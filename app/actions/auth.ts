@@ -1,7 +1,10 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { verifyPassword, generateToken } from "@/lib/auth"
+import bcrypt from "bcryptjs"
+import jwt from "jsonwebtoken"
+
+const JWT_SECRET = process.env.JWT_SECRET || "default-secret-change-in-production"
 
 export async function validateLogin(email: string, password: string) {
   console.log("[v0] ====== SERVER ACTION: validateLogin ======")
@@ -34,8 +37,8 @@ export async function validateLogin(email: string, password: string) {
 
     console.log("[v0] User found, verifying password...")
     
-    // Verify password using the auth utility
-    const isValidPassword = await verifyPassword(password, user.password)
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, user.password)
 
     if (!isValidPassword) {
       console.log("[v0] Invalid password")
@@ -56,15 +59,18 @@ export async function validateLogin(email: string, password: string) {
 
     console.log("[v0] Login successful! Generating token...")
 
-    // Generate JWT token using the auth utility (same as API route)
-    const token = await generateToken({
-      id: user.id,
-      email: user.email,
-      nombre: user.nombre,
-      rol: user.rol,
-    })
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        role: user.rol,
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    )
 
-    console.log("[v0] User authenticated successfully, token length:", token.length)
+    console.log("[v0] User authenticated successfully")
 
     return {
       success: true,

@@ -99,15 +99,11 @@ export default function LoginPage() {
 
       if (result.token) {
         localStorage.setItem("authToken", result.token)
-        console.log("[v0] Client: Token saved to localStorage, length:", result.token.length)
-      } else {
-        console.log("[v0] Client: WARNING - No token in result")
       }
 
       console.log("[v0] Client: Verifying localStorage after login:", {
         savedUserId: localStorage.getItem("userId"),
-        isAuthenticated: localStorage.getItem("isAuthenticated"),
-        hasToken: !!localStorage.getItem("authToken")
+        isAuthenticated: localStorage.getItem("isAuthenticated")
       })
 
       console.log("[v0] Client: Login successful, redirecting to dashboard")

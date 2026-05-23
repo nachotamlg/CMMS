@@ -6,7 +6,7 @@ import { z } from 'zod'
 // GET - Listar equipos con filtros
 export async function GET(request: NextRequest) {
   try {
-    await requireAuth(request)
+    await requireAuth()
     
     const { searchParams } = new URL(request.url)
     const tipo = searchParams.get('tipo')
@@ -55,18 +55,18 @@ export async function GET(request: NextRequest) {
 
 // POST - Crear equipo
 const createEquipoSchema = z.object({
-  codigo: z.string().regex(/^\d{12}$/, 'El código institucional debe tener exactamente 12 dígitos'),
-  nombre: z.string().min(3, 'El nombre debe tener al menos 3 caracteres'),
+  codigo: z.string().min(1, 'Código requerido'),
+  nombre: z.string().min(1, 'Nombre requerido'),
   tipo: z.string().min(1, 'Tipo requerido'),
   marca: z.string().optional(),
   modelo: z.string().optional(),
-  numero_serie: z.string().min(3, 'El número de serie debe tener al menos 3 caracteres'),
+  numero_serie: z.string().optional(),
   ubicacion: z.string().optional(),
   fecha_adquisicion: z.string().optional(),
   vida_util_anos: z.number().optional(),
   valor_adquisicion: z.number().optional(),
-  estado: z.string().min(1, 'El estado del equipo es obligatorio'),
-  criticidad: z.string().min(1, 'El nivel de riesgo es obligatorio'),
+  estado: z.string().min(1, 'Estado requerido'),
+  criticidad: z.string().min(1, 'Criticidad requerida'),
   descripcion: z.string().optional(),
   especificaciones: z.any().optional(),
   horas_operacion: z.number().optional(),
@@ -74,7 +74,7 @@ const createEquipoSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireAuth(request)
+    const session = await requireAuth()
     const body = await request.json()
     
     const validation = createEquipoSchema.safeParse(body)
@@ -88,25 +88,13 @@ export async function POST(request: NextRequest) {
     const data = validation.data
     
     // Verificar que el código no exista
-    const existenteCodigo = await prisma.equipo.findUnique({
+    const existente = await prisma.equipo.findUnique({
       where: { codigo: data.codigo },
     })
     
-    if (existenteCodigo) {
+    if (existente) {
       return NextResponse.json(
-        { error: 'Ya existe un equipo con ese código institucional' },
-        { status: 400 }
-      )
-    }
-
-    // Verificar que el número de serie no exista
-    const existenteSerie = await prisma.equipo.findFirst({
-      where: { numero_serie: data.numero_serie },
-    })
-    
-    if (existenteSerie) {
-      return NextResponse.json(
-        { error: 'Ya existe un equipo con ese número de serie' },
+        { error: 'Ya existe un equipo con ese código' },
         { status: 400 }
       )
     }
@@ -126,7 +114,7 @@ export async function POST(request: NextRequest) {
         usuario_id: session.id,
         accion: 'Crear',
         modulo: 'Equipos',
-        descripcion: `Equipo creado: ${equipo.nombre} (Código: ${equipo.codigo})`,
+        descripcion: `Equipo creado: ${equipo.nombre}`,
         datos: { equipo_id: equipo.id },
       },
     })

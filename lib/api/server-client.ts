@@ -1,4 +1,4 @@
-// Server-side API client - Using Next.js API Routes as the primary backend
+// Server-side API client - Using Next.js API Routes instead of Laravel backend
 // This is used by Server Actions and cannot use localStorage or browser APIs
 
 // Use Next.js API routes instead of external backend

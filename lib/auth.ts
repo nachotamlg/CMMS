@@ -27,16 +27,10 @@ export async function generateToken(payload: JWTPayload): Promise<string> {
 // Verificar token JWT
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    console.log('[v0] verifyToken - token length:', token?.length)
-    if (!token) {
-      console.log('[v0] verifyToken - token is empty')
-      return null
-    }
     const { payload } = await jwtVerify(token, secret)
-    console.log('[v0] verifyToken - token verified successfully')
     return payload as unknown as JWTPayload
-  } catch (error: any) {
-    console.error('[v0] verifyToken - Error verifying token:', error.message)
+  } catch (error) {
+    console.error('[v0] Error verifying token:', error)
     return null
   }
 }
@@ -62,52 +56,13 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 // Middleware para verificar autenticación
-export async function requireAuth(request?: any): Promise<JWTPayload> {
-  let session = await getSession()
-  console.log('[v0] requireAuth - session from cookies:', !!session)
-  
-  // Si no hay sesión en cookies, intentar obtener del header Authorization (Bearer token)
-  if (!session && request) {
-    const authHeader = request.headers.get('Authorization')
-    console.log('[v0] requireAuth - authHeader present:', !!authHeader)
-    
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7)
-      console.log('[v0] requireAuth - attempting to verify Bearer token, length:', token?.length)
-      session = await verifyToken(token)
-      console.log('[v0] requireAuth - Bearer token verification result:', session ? 'SUCCESS' : 'FAILED')
-    }
-  }
-  
-  // Fallback: try to get userId from X-User-ID header to authenticate basic operations
-  if (!session && request) {
-    const userId = request.headers.get('X-User-ID')
-    console.log('[v0] requireAuth - X-User-ID header present:', !!userId)
-    
-    if (userId) {
-      // Create a minimal session from the userId header (fallback authentication)
-      try {
-        const id = parseInt(userId)
-        console.log('[v0] requireAuth - creating session from X-User-ID:', id)
-        session = {
-          id,
-          email: `user_${id}@system.local`,
-          nombre: `User ${id}`,
-          rol: 'Usuario'
-        }
-        console.log('[v0] requireAuth - fallback session created from X-User-ID')
-      } catch (e) {
-        console.error('[v0] requireAuth - failed to parse X-User-ID:', e)
-      }
-    }
-  }
+export async function requireAuth(): Promise<JWTPayload> {
+  const session = await getSession()
   
   if (!session) {
-    console.log('[v0] requireAuth - NO SESSION FOUND - throwing 401')
     throw new Error('No autorizado')
   }
   
-  console.log('[v0] requireAuth - session authenticated:', session.email)
   return session
 }
 

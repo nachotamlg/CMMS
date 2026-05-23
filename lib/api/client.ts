@@ -110,7 +110,7 @@ class ApiClient {
       if (error instanceof Error) {
         if (error.name === "AbortError") {
           throw new Error(
-            "Request timeout - El servidor no responde. Verifica la conexión.",
+            "Request timeout - El backend de Laravel no responde. Verifica que esté corriendo en el puerto correcto.",
           )
         }
       }

@@ -1,7 +1,7 @@
 import { apiClient } from "./client"
 import { getUsuarios } from "./usuarios"
 import { getEquipos } from "./equipos"
-import { getMantenimientos } from "./mantenimientos"
+import { getAllMantenimientos } from "./mantenimientos"
 import { getOrdenesTrabajo } from "./ordenes-trabajo"
 
 export interface DashboardStats {
@@ -19,7 +19,7 @@ async function calculateDashboardStats(): Promise<DashboardStats> {
     const [usuarios, equipos, mantenimientos, ordenes] = await Promise.all([
       getUsuarios(),
       getEquipos({}),
-      getMantenimientos(),
+      getAllMantenimientos({}),
       getOrdenesTrabajo({}),
     ])
 

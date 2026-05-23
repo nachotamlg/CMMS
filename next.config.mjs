@@ -49,7 +49,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data:",
-              "connect-src 'self' https://va.vercel-scripts.com https://*.vercel-analytics.com blob:",
+              "connect-src 'self' https://va.vercel-scripts.com https://*.vercel-analytics.com http://localhost:8000 blob:",
               "object-src 'none'",
               "base-uri 'self'",
               "form-action 'self'",

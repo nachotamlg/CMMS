@@ -3,7 +3,6 @@ import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { z } from 'zod'
 import { addDays } from 'date-fns'
-import { frecuenciaToDias, validateMaintenanceDateRange } from '@/lib/validation/maintenance-validation'
 
 // GET - Listar mantenimientos programados
 export async function GET(request: NextRequest) {
@@ -54,13 +53,6 @@ export async function GET(request: NextRequest) {
             id: true,
             realizado_por: true,
             fecha_realizacion: true,
-            tecnico: {
-              select: {
-                id: true,
-                nombre: true,
-                email: true,
-              },
-            },
           },
         },
       },
@@ -76,8 +68,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-
-
 // POST - Crear mantenimiento programado
 const createMantenimientoSchema = z.object({
   equipo_id: z.number({ required_error: 'Equipo requerido' }),
@@ -85,7 +75,6 @@ const createMantenimientoSchema = z.object({
   frecuencia: z.string().min(1, 'Frecuencia requerida'),
   frecuencia_dias: z.number({ required_error: 'Frecuencia en días requerida' }),
   proxima_programada: z.string({ required_error: 'Fecha próxima requerida' }),
-  ultima_realizacion: z.string().optional(),
   descripcion: z.string().min(1, 'Descripción requerida'),
   procedimiento: z.string().optional(),
   tiempo_estimado: z.number().optional(),
@@ -105,23 +94,6 @@ export async function POST(request: NextRequest) {
     }
     
     const data = validation.data
-    const proximaProgramada = new Date(data.proxima_programada)
-    const ultimaRealizacion = data.ultima_realizacion ? new Date(data.ultima_realizacion) : null
-    
-    // Validate maintenance dates based on frequency
-    const dateValidation = validateMaintenanceDateRange(
-      proximaProgramada,
-      ultimaRealizacion,
-      data.frecuencia_dias,
-      data.frecuencia
-    )
-
-    if (!dateValidation.valid) {
-      return NextResponse.json(
-        { error: dateValidation.error },
-        { status: 400 }
-      )
-    }
     
     const mantenimiento = await prisma.mantenimiento.create({
       data: {
@@ -129,8 +101,7 @@ export async function POST(request: NextRequest) {
         tipo: data.tipo,
         frecuencia: data.frecuencia,
         frecuencia_dias: data.frecuencia_dias,
-        proxima_programada: proximaProgramada,
-        ultima_realizacion: ultimaRealizacion,
+        proxima_programada: new Date(data.proxima_programada),
         descripcion: data.descripcion,
         procedimiento: data.procedimiento,
         tiempo_estimado: data.tiempo_estimado,

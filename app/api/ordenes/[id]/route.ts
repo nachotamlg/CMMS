@@ -165,7 +165,7 @@ export async function PUT(
     await prisma.log.create({
       data: {
         usuario_id: session.id,
-        accion: 'Editar',
+        accion: 'Actualizar',
         modulo: 'Órdenes de Trabajo',
         descripcion: `Orden actualizada: ${orden.numero_orden}`,
         datos: { orden_id: orden.id, cambios: data },
@@ -176,39 +176,29 @@ export async function PUT(
     if (data.asignado_a !== undefined && 
         data.asignado_a !== ordenExistente.asignado_a) {
       if (data.asignado_a) {
-        try {
-          await prisma.notificacion.create({
-            data: {
-              usuario_id: data.asignado_a,
-              tipo: 'orden_asignada',
-              titulo: 'Orden asignada',
-              mensaje: `Se te ha asignado la orden ${orden.numero_orden}`,
-              datos: { orden_id: orden.id },
-            },
-          })
-          console.log('[v0] Notification created for new technician assignment:', data.asignado_a)
-        } catch (notificationError) {
-          console.error('[v0] Error creating notification for technician assignment:', notificationError)
-        }
+        await prisma.notificacion.create({
+          data: {
+            usuario_id: data.asignado_a,
+            tipo: 'orden_asignada',
+            titulo: 'Orden asignada',
+            mensaje: `Se te ha asignado la orden ${orden.numero_orden}`,
+            datos: { orden_id: orden.id },
+          },
+        })
       }
     }
     
     // Notificar si cambió el estado
     if (data.estado && data.estado !== ordenExistente.estado) {
-      try {
-        await prisma.notificacion.create({
-          data: {
-            usuario_id: ordenExistente.creado_por,
-            tipo: 'orden_actualizada',
-            titulo: 'Estado de orden actualizado',
-            mensaje: `La orden ${orden.numero_orden} cambió a ${data.estado}`,
-            datos: { orden_id: orden.id },
-          },
-        })
-        console.log('[v0] Notification created for status change:', data.estado)
-      } catch (notificationError) {
-        console.error('[v0] Error creating notification for status change:', notificationError)
-      }
+      await prisma.notificacion.create({
+        data: {
+          usuario_id: ordenExistente.creado_por,
+          tipo: 'orden_actualizada',
+          titulo: 'Estado de orden actualizado',
+          mensaje: `La orden ${orden.numero_orden} cambió a ${data.estado}`,
+          datos: { orden_id: orden.id },
+        },
+      })
     }
     
     return NextResponse.json(orden)

@@ -5,7 +5,6 @@ import { TooltipContent } from "@/components/ui/tooltip"
 import React from "react"
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react" // Added useRef
-import { formatDateForInput } from "@/lib/utils"
 import { getDashboardStats, type DashboardStats } from "@/app/actions/dashboard"
 import { fetchEquipos, saveEquipo, removeEquipo, fetchEquipoDetails, getEquipo, checkEquipoAssociations, type Equipo } from "@/app/actions/equipos"
 import {
@@ -21,7 +20,6 @@ import {
 } from "@/app/actions/usuarios"
 import { getHospitalLogo, setHospitalLogo as saveHospitalLogo } from "@/app/actions/configuracion"
 import { SmartMaintenanceCalendar } from "@/components/smart-maintenance-calendar"
-import { MonthlyMaintenanceCalendar } from "@/components/monthly-maintenance-calendar"
 import { AbortableModuleLoader, deduplicateRequest, clearCache } from "@/lib/utils/module-loader"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -106,14 +104,13 @@ import {
   updateMantenimiento, // Imported updateMantenimiento
   deleteMantenimiento, // Imported deleteMantenimiento
   checkUpcomingMaintenances,
-  completeMantenimiento, // Imported completeMantenimiento
 } from "./actions/mantenimientos"
-
 import type { Mantenimiento } from "@/lib/api/mantenimientos"
 import { generatePDF, downloadPDF, generateEquipmentTechnicalSheet, generateWorkOrderPDF } from "@/lib/pdf-generator" // Added generateEquipmentTechnicalSheet, generateWorkOrderPDF
 import { canAccessSection, type CurrentUser, type RoleType, type PermissionKey, DEFAULT_PERMISSIONS_BY_ROLE } from "@/lib/utils/permissions" // Import DEFAULT_PERMISSIONS_BY_ROLE
+import { filterLogs } from "@/lib/api/logs"
 import { fetchAuditLogs } from "@/app/actions/logs"
-import { type Notification } from "@/app/actions/notificaciones"
+import { getNotifications, markAsRead, markAllAsRead, type Notification } from "@/lib/api/notifications"
 import { Alert, AlertDescription } from "@/components/ui/alert" // Added Alert component
 import { EquipmentCombobox } from "@/components/equipment-combobox"
 import { useToast } from "@/components/ui/use-toast" // Imported toast
@@ -124,7 +121,7 @@ import { getDocumentoUrl } from "@/lib/api/documentos" // Imported getDocumentoU
 // import { checkUpcomingMaintenances } from "@/lib/api/mantenimientos"
 
 // ADDED: Helper function to format dates to DD-MM-YYYY
-function formatDate(dateString: string | Date | undefined | null): string {
+function formatDate(dateString: string | undefined | null): string {
   if (!dateString) return "-"
 
   try {
@@ -431,7 +428,7 @@ export default function DashboardPage() {
   const [selectedMaintenance, setSelectedMaintenance] = useState<Mantenimiento | null>(null)
   const [maintenanceFormErrors, setMaintenanceFormErrors] = useState<Record<string, string>>({}) // ADDED
   // CHANGE: Removed default values from frecuencia field
-  const [maintenanceForm, setMaintenanceForm] = useState<Partial<Mantenimiento>>({})
+  const [maintenanceForm, setMaintenanceForm] = useState<Partial<Mantenimiento>>({ resultado: "pendiente" }) // ADDED
 
   const [workOrders, setWorkOrders] = useState<OrdenTrabajo[]>([])
   const [orderFilters, setOrderFilters] = useState({
@@ -459,6 +456,7 @@ export default function DashboardPage() {
   const [isLoadingOrders, setIsLoadingOrders] = useState(false) // CHANGE: Add loading state for orders
 
   const [selectedTechnicianId, setSelectedTechnicianId] = useState<number | null>(null)
+  const [statusObservaciones, setStatusObservaciones] = useState("")
   const [newStatus, setNewStatus] = useState("") // ADDED: State for new status in change status dialog
 
   // CHANGE: Updated report type to include cronograma
@@ -468,15 +466,12 @@ export default function DashboardPage() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
-  const [authChecked, setAuthChecked] = useState(false) // NEW: Track if auth has been checked
 
   // ADDED: Audit log states
   const [auditLogs, setAuditLogs] = useState<any[]>([])
   const [logSearchTerm, setLogSearchTerm] = useState("")
   const [logActionFilter, setLogActionFilter] = useState("all")
   const [logCurrentPage, setLogCurrentPage] = useState(1)
-  const [logsLoading, setLogsLoading] = useState(false)
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   const logsPerPage = 10
 
   const [notifications, setNotifications] = React.useState<Notification[]>([])
@@ -528,8 +523,6 @@ export default function DashboardPage() {
   const [isDeleteMaintenanceDialogOpen, setIsDeleteMaintenanceDialogOpen] = useState(false)
   const [selectedMaintenanceToDelete, setSelectedMaintenanceToDelete] = useState<number | null>(null)
 
-
-
   // CHANGE: Moved layout and navigation logic to AppHeader and AppSidebar components
   const [currentView, setCurrentView] = useState("dashboard")
   const [activeTab, setActiveTab] = useState("dashboard") // Not used in the main logic, can be removed or integrated
@@ -570,20 +563,6 @@ export default function DashboardPage() {
       ordersLoaderRef.current.abort()
     }
   }, [])
-
-  // Sync form when editing user changes
-  useEffect(() => {
-    if (editingUser) {
-      setNewUser({
-        id: editingUser.id,
-        nombre: editingUser.nombre,
-        email: editingUser.email,
-        rol: editingUser.rol,
-        estado: editingUser.estado || "Activo",
-      })
-      setUserFormErrors({})
-    }
-  }, [editingUser])
 
   const loadEquipment = useCallback(async () => {
     console.log("[v0] loadEquipment - Starting with filters:", { currentPage, perPage, searchTerm, equipmentFilters })
@@ -666,28 +645,15 @@ export default function DashboardPage() {
       }
 
       // Use deduplicated request to avoid concurrent calls
-      const cacheKey = `ordenes_${JSON.stringify(params)}`
-      console.log("[v0] loadWorkOrders - Cache key:", cacheKey)
-      
       const response = await deduplicateRequest(
-        cacheKey,
+        `ordenes_${JSON.stringify(params)}`,
         () => fetchOrdenesTrabajo(params),
         3 * 60 * 1000 // 3 minute cache
       )
 
-      console.log("[v0] loadWorkOrders - API Response:", response)
-      
-      // Ensure response has the correct structure
-      if (!response || !response.data) {
-        console.error("[v0] loadWorkOrders - Invalid response structure:", response)
-        setWorkOrders([])
-        setOrderTotalPages(1)
-        return
-      }
-      
       setWorkOrders(response.data)
       setOrderTotalPages(response.lastPage) // Use renamed state
-      console.log("[v0] loadWorkOrders - Successfully loaded", response.data?.length ?? 0, "items")
+      console.log("[v0] loadWorkOrders - Successfully loaded", response.data.length, "items")
     } catch (error) {
       console.error("[v0] loadWorkOrders - Error:", error)
       setWorkOrders([])
@@ -753,51 +719,33 @@ export default function DashboardPage() {
   }
 
   // ADDED: Load audit logs from backend when section becomes active
-  // Load initial audit logs when section changes
   useEffect(() => {
     if (activeSection === "auditoria") {
       loadAuditLogs()
     }
   }, [activeSection])
 
-  // Debounce search term (wait 500ms after user stops typing)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(logSearchTerm)
-    }, 500)
-
-    return () => clearTimeout(timer)
-  }, [logSearchTerm])
-
-  // Load audit logs when debounced search or filter changes
-  useEffect(() => {
-    if (activeSection === "auditoria") {
-      loadAuditLogs()
-    }
-  }, [debouncedSearchTerm, logActionFilter, activeSection])
-
   const loadAuditLogs = async () => {
     try {
-      setLogsLoading(true)
-      console.log("[v0] loadAuditLogs - Calling fetchAuditLogs with:", { search: debouncedSearchTerm, action: logActionFilter })
+      const result = await fetchAuditLogs(logSearchTerm, logActionFilter, 100)
       
-      const result = await fetchAuditLogs(debouncedSearchTerm, logActionFilter, 1000)
-      console.log("[v0] loadAuditLogs - Response:", result)
+      // Handle both array and object responses
+      const logsData = Array.isArray(result) ? result : (result.data && Array.isArray(result.data) ? result.data : [])
       
-      // Extract logs data from response
-      let logsData: any[] = []
-      
-      if (result && result.data && Array.isArray(result.data)) {
-        // Response format: { success: true, data: [...] }
-        logsData = result.data
-      } else if (Array.isArray(result)) {
-        // Direct array response
-        logsData = result
+      if (logsData.length > 0) {
+        setAuditLogs(logsData)
+        toast({
+          title: "Logs cargados",
+          description: `Se cargaron ${logsData.length} registros de auditoría`,
+        })
+      } else {
+        setAuditLogs([])
+        toast({
+          title: "Sin datos",
+          description: "No se encontraron registros de auditoría en la base de datos.",
+          variant: "destructive",
+        })
       }
-      
-      console.log("[v0] loadAuditLogs - Loaded logs count:", logsData.length)
-      setAuditLogs(logsData)
-      setLogCurrentPage(1) // Reset to first page when filters change
     } catch (error) {
       console.error("[v0] loadAuditLogs - Error:", error)
       setAuditLogs([])
@@ -806,8 +754,6 @@ export default function DashboardPage() {
         description: "Error al cargar los registros de auditoría.",
         variant: "destructive",
       })
-    } finally {
-      setLogsLoading(false)
     }
   }
 
@@ -872,21 +818,21 @@ export default function DashboardPage() {
       const currentUserWithPermissions: CurrentUser = {
         id: userId,
         nombre: storedName,
-        email: userEmail,
+        correo: userEmail,
         rol: storedRole,
+        especialidad: "",
         permissions: DEFAULT_PERMISSIONS_BY_ROLE[storedRole],
       }
       setCurrentUser(currentUserWithPermissions)
       setUserRole(storedRole)
     }
-    
-    // Mark auth check as complete
-    setAuthChecked(true)
+
+    setLoading(false)
   }
 
   useEffect(() => {
     checkAuthentication()
-  }, [])
+  }, [router])
 
   // Moved useEffect hooks to the top level
   // Update total user pages and reset current page if it becomes invalid
@@ -899,42 +845,16 @@ export default function DashboardPage() {
   }, [users, usersPerPage, usersPaginaActual, setUsersTotalPages, setUsersPaginaActual])
 
   // Moved useEffect hooks to the top level
-  // Load notifications when the component mounts and when currentUser changes
+  // Load notifications when the component mounts
   useEffect(() => {
-    if (currentUser?.id) {
-      console.log("[v0] Loading notifications for user:", currentUser.id)
-      loadNotifications()
-    }
-  }, [currentUser?.id])
-
-  // Define loadNotifications here so it can be used in useEffect below
-  const loadNotifications = async () => {
-    try {
-      const { getNotificationsForUser } = await import("@/app/actions/notificaciones")
-      const notifs = await getNotificationsForUser(currentUser?.id)
-      setNotifications(notifs)
-      setUnreadCount(notifs.filter((n) => !n.leida).length)
-      console.log("[v0] Loaded notifications:", notifs.length, "for user:", currentUser?.id)
-    } catch (error) {
-      console.error("[v0] Error loading notifications:", error)
-      setNotifications([])
-      setUnreadCount(0)
-    }
-  }
+    loadNotifications()
+  }, [])
 
   useEffect(() => {
     const checkMaintenances = async () => {
       try {
-        console.log("[v0] Checking maintenance notifications...")
-        // Generate automatic maintenance notifications
-        const { generateMaintenanceNotifications } = await import("@/app/actions/notificaciones")
-        const result = await generateMaintenanceNotifications()
-        
-        console.log("[v0] Generated", result.notificaciones_creadas, "maintenance notifications")
-        
-        // Reload notifications only if new ones were created
-        if (result && result.notificaciones_creadas > 0 && currentUser?.id) {
-          console.log("[v0] Reloading notifications after maintenance check...")
+        const result = await checkUpcomingMaintenances()
+        if (result && result.notificaciones_creadas > 0) {
           loadNotifications()
         }
       } catch (error) {
@@ -942,14 +862,12 @@ export default function DashboardPage() {
       }
     }
 
-    // Only run if user is logged in
-    if (currentUser?.id) {
-      checkMaintenances()
-      // Check every 5 minutes
-      const interval = setInterval(checkMaintenances, 5 * 60 * 1000)
-      return () => clearInterval(interval)
-    }
-  }, [currentUser?.id])
+    checkMaintenances()
+    // Check every 5 minutes
+    const interval = setInterval(checkMaintenances, 5 * 60 * 1000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   // ADDED: Load equipment when entering mantenimiento section to populate select options
   useEffect(() => {
@@ -992,7 +910,7 @@ export default function DashboardPage() {
   //   }
   // }, [activeSection])
 
-  // CHANGE: Load dashboard stats once when authentication is checked
+  // CHANGE: Load dashboard stats once when component mounts or user is authenticated
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -1000,7 +918,6 @@ export default function DashboardPage() {
         const data = await getDashboardStats()
         console.log("[v0] Dashboard - stats received:", data)
         setStats(data)
-        setLoading(false)
       } catch (error) {
         console.error("[v0] Dashboard - error fetching stats:", error)
         setStats({
@@ -1011,16 +928,18 @@ export default function DashboardPage() {
           equiposPorFabricante: [],
           mantenimientosPorMes: [],
         })
-        setLoading(false)
       }
     }
 
-    // Load stats once authentication check is complete
-    if (authChecked) {
-      console.log("[v0] Dashboard - auth checked, fetching stats")
+    // Load stats when component mounts or when user is set
+    if (currentUser) {
+      fetchData()
+    } else if (!loading) {
+      // If loading is done but no currentUser, still try to fetch stats
+      // This handles cases where auth is bypassed or not required
       fetchData()
     }
-  }, [authChecked])
+  }, [currentUser, loading])
 
   // --- Maintenance Loaders and Stats ---
   const loadMaintenanceSchedules = async () => {
@@ -1052,6 +971,7 @@ export default function DashboardPage() {
           frecuencia: "Mensual",
           proximaFecha: "2024-08-15",
           ultimaFecha: "2024-07-15",
+          resultado: "Completado",
           observaciones: "Mantenimiento preventivo estándar realizado.",
         },
         {
@@ -1062,6 +982,7 @@ export default function DashboardPage() {
           frecuencia: "N/A",
           proximaFecha: "2024-08-20",
           ultimaFecha: "2024-08-10",
+          resultado: "Pendiente",
           observaciones: "Falla en el display, requiere revisión.",
         },
       ])
@@ -1106,12 +1027,7 @@ export default function DashboardPage() {
       loadWorkOrders()
       loadUsers()
     }
-  }, [activeSection, orderCurrentPage, orderPerPage, orderFilters, searchOrder, loadWorkOrders])
-
-  // Reset pagination when filters or search term changes
-  useEffect(() => {
-    setOrderCurrentPage(1)
-  }, [orderFilters, searchOrder])
+  }, [activeSection, orderCurrentPage, orderPerPage, loadWorkOrders])
 
   // Load users when entering the 'tecnicos' section.
   useEffect(() => {
@@ -1191,24 +1107,6 @@ export default function DashboardPage() {
       errors.descripcion = "La descripción es requerida"
     }
 
-    // Validate dates
-    if (newOrderData.fechaInicio && newOrderData.fechaFinalizacion) {
-      const fechaInicio = new Date(newOrderData.fechaInicio)
-      const fechaFinalizacion = new Date(newOrderData.fechaFinalizacion)
-      
-      if (fechaFinalizacion < fechaInicio) {
-        errors.fechaFinalizacion = "La fecha de finalización debe ser posterior a la fecha de inicio"
-      }
-    }
-
-    if (newOrderData.fechaInicio && !newOrderData.fechaFinalizacion) {
-      errors.fechaFinalizacion = "La fecha de finalización es requerida si se establece una fecha de inicio"
-    }
-
-    if (newOrderData.fechaFinalizacion && !newOrderData.fechaInicio) {
-      errors.fechaInicio = "La fecha de inicio es requerida si se establece una fecha de finalización"
-    }
-
     if (Object.keys(errors).length > 0) {
       console.log("[v0] handleSaveOrder - Validation errors:", errors)
       setOrderFormErrors(errors)
@@ -1228,50 +1126,34 @@ export default function DashboardPage() {
         estado: newOrderData.estado,
         tecnicoAsignadoId: newOrderData.tecnicoAsignadoId,
         fechaCreacion: newOrderData.fechaCreacion,
-        fechaInicio: newOrderData.fechaInicio,
-        fechaFinalizacion: newOrderData.fechaFinalizacion,
         horasTrabajadas: newOrderData.horasTrabajadas,
         costoRepuestos: newOrderData.costoRepuestos,
         costoTotal: newOrderData.costoTotal,
+        observaciones: newOrderData.observaciones,
       }
 
-  console.log("[v0] handleSaveOrder - Mapped data before save:", mappedData)
-  const result = await saveOrdenTrabajo(mappedData)
-  
-  if (result.success && result.data) {
-  toast({
-  title: selectedOrder ? "Orden actualizada" : "Orden creada",
-  description: selectedOrder
-  ? "La orden de trabajo ha sido actualizada correctamente"
-  : "La orden de trabajo ha sido creada correctamente",
-  })
-  setIsOrderDialogOpen(false)
-  setNewOrderData({
-  tipo: "Preventivo",
-  prioridad: "media",
-  estado: "abierta",
-  fechaCreacion: new Date().toISOString().split("T")[0],
-  })
-  setSelectedOrder(null)
-  // Clear all order-related cache entries to force refresh
-  const params = {
-    estado: orderFilters.estado !== "all" ? orderFilters.estado : undefined,
-    prioridad: orderFilters.prioridad !== "all" ? orderFilters.prioridad : undefined,
-    tipo: orderFilters.tipo !== "all" ? orderFilters.tipo : undefined,
-    fechaDesde: orderFilters.fechaDesde || undefined,
-    fechaHasta: orderFilters.fechaHasta || undefined,
-    search: searchOrder || undefined,
-    page: orderCurrentPage,
-    perPage: orderPerPage,
-  }
-  const cacheKeyToClear = `ordenes_${JSON.stringify(params)}`
-  console.log("[v0] handleSaveOrder - Clearing cache with key:", cacheKeyToClear)
-  clearCache(cacheKeyToClear)
-  console.log("[v0] handleSaveOrder - Cache cleared, calling loadWorkOrders")
-  await loadWorkOrders()
-  } else {
-  throw new Error(result.error || "No se recibió respuesta del servidor")
-  }
+      console.log("[v0] handleSaveOrder - Mapped data before save:", mappedData)
+      const savedOrder = await saveOrdenTrabajo(mappedData)
+
+      if (savedOrder) {
+        toast({
+          title: selectedOrder ? "Orden actualizada" : "Orden creada",
+          description: selectedOrder
+            ? "La orden de trabajo ha sido actualizada correctamente"
+            : "La orden de trabajo ha sido creada correctamente",
+        })
+        setIsOrderDialogOpen(false)
+        setNewOrderData({
+          tipo: "Preventivo",
+          prioridad: "media",
+          estado: "abierta",
+          fechaCreacion: new Date().toISOString().split("T")[0],
+        })
+        setSelectedOrder(null)
+        await loadWorkOrders()
+      } else {
+        throw new Error("No se recibió respuesta del servidor")
+      }
     } catch (error) {
       console.error("[v0] handleSaveOrder - Error:", error)
       const errorMessage = error instanceof Error ? error.message : "Error desconocido"
@@ -1308,8 +1190,6 @@ export default function DashboardPage() {
         })
         setIsDeleteDialogOpen(false)
         setSelectedOrderToDelete(null)
-        // Clear cache before reloading to ensure fresh data
-        clearCache()
         await loadWorkOrders()
       } else {
         toast({
@@ -1333,49 +1213,28 @@ export default function DashboardPage() {
   const handleAssignTechnician = async () => {
     if (selectedOrder && selectedTechnicianId) {
       const result = await asignarTecnicoAOrden(selectedOrder.id, selectedTechnicianId)
-      if (result && result.success && result.data) {
-        // Update the selected order with the new technician data
-        setSelectedOrder(result.data)
-        // Also refresh the work orders list
+      if (result) {
         await loadWorkOrders()
-        // Show success feedback
-        toast({
-          title: "Técnico asignado",
-          description: "El técnico ha sido asignado a la orden de trabajo",
-        })
         setIsAssignDialogOpen(false)
+        setSelectedOrder(null)
         setSelectedTechnicianId(null)
       } else {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: "No se pudo asignar el técnico a la orden.",
-        })
+        alert("Error al asignar técnico.")
       }
     }
   }
 
   const handleChangeStatus = async () => {
     if (selectedOrder && newStatus) {
-      const result = await cambiarEstadoOrden(selectedOrder.id, newStatus)
-      if (result && result.success && result.data) {
-        // Update the selected order with the new data
-        setSelectedOrder(result.data)
-        // Also refresh the work orders list
+      const result = await cambiarEstadoOrden(selectedOrder.id, newStatus, statusObservaciones || undefined)
+      if (result) {
         await loadWorkOrders()
-        // Show success feedback
-        toast({
-          title: "Estado actualizado",
-          description: "La orden de trabajo ha sido actualizada correctamente",
-        })
         setIsStatusDialogOpen(false)
+        setSelectedOrder(null)
         setNewStatus("")
+        setStatusObservaciones("")
       } else {
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: "No se pudo cambiar el estado de la orden.",
-        })
+        alert("Error al cambiar estado.")
       }
     }
   }
@@ -1644,49 +1503,14 @@ export default function DashboardPage() {
                         No se encontraron órdenes de trabajo
                       </td>
                     </tr>
-                ) : (
-                  paginatedOrders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-600 font-mono">{order.numeroOrden}</td>
-                      <td className="px-4 py-3">{order.equipoNombre}</td>
+                  ) : (
+                    paginatedOrders.map((order) => (
+                      <tr key={order.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium">{order.numeroOrden}</td>
+                        <td className="px-4 py-3">{order.equipoNombre}</td>
                         <td className="px-4 py-3">{order.tipo}</td>
                         <td className="px-4 py-3">{getPriorityBadge(order.prioridad)}</td>
-                        <td className="px-4 py-3">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm" className="p-0">
-                                {getEstadoOrdenBadge(order.estado)}
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start">
-                              <DropdownMenuItem onClick={() => {
-                                setSelectedOrder(order)
-                                setNewStatus('abierta')
-                                setIsStatusDialogOpen(true)
-                              }}>Abierta</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => {
-                                setSelectedOrder(order)
-                                setNewStatus('en_progreso')
-                                setIsStatusDialogOpen(true)
-                              }}>En Progreso</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => {
-                                setSelectedOrder(order)
-                                setNewStatus('completada')
-                                setIsStatusDialogOpen(true)
-                              }}>Completada</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => {
-                                setSelectedOrder(order)
-                                setNewStatus('pospuesta')
-                                setIsStatusDialogOpen(true)
-                              }}>Pospuesta</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => {
-                                setSelectedOrder(order)
-                                setNewStatus('cancelada')
-                                setIsStatusDialogOpen(true)
-                              }}>Cancelada</DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </td>
+                        <td className="px-4 py-3">{getEstadoOrdenBadge(order.estado)}</td>
                         <td className="px-4 py-3">
                           {order.tecnicoAsignadoNombre || <span className="text-gray-400 text-sm">Sin asignar</span>}
                         </td>
@@ -1727,13 +1551,7 @@ export default function DashboardPage() {
                                 <DropdownMenuItem
                                   onClick={() => {
                                     setSelectedOrder(order)
-                                    // Format dates for input fields using formatDateForInput utility
-                                    setNewOrderData({
-                                      ...order,
-                                      fechaCreacion: formatDateForInput(order.fechaCreacion),
-                                      fechaInicio: formatDateForInput(order.fechaInicio),
-                                      fechaFinalizacion: formatDateForInput(order.fechaFinalizacion),
-                                    })
+                                    setNewOrderData(order)
                                     setIsOrderDialogOpen(true)
                                   }}
                                 >
@@ -1823,10 +1641,10 @@ export default function DashboardPage() {
 
         {/* Create/Edit Order Dialog */}
         <Dialog open={isOrderDialogOpen} onOpenChange={setIsOrderDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="order-form-desc">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{selectedOrder ? "Editar Orden" : "Nueva Orden de Trabajo"}</DialogTitle>
-              <DialogDescription id="order-form-desc">
+              <DialogDescription>
                 {selectedOrder ? "Modifica los datos de la orden" : "Completa los datos para crear una nueva orden"}
               </DialogDescription>
             </DialogHeader>
@@ -1986,11 +1804,7 @@ export default function DashboardPage() {
                     type="date"
                     value={newOrderData.fechaInicio || ""}
                     onChange={(e) => setNewOrderData({ ...newOrderData, fechaInicio: e.target.value })}
-                    className={orderFormErrors.fechaInicio ? "border-red-500" : ""}
                   />
-                  {orderFormErrors.fechaInicio && (
-                    <p className="text-red-500 text-xs">{orderFormErrors.fechaInicio}</p>
-                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -2001,11 +1815,7 @@ export default function DashboardPage() {
                     type="date"
                     value={newOrderData.fechaFinalizacion || ""}
                     onChange={(e) => setNewOrderData({ ...newOrderData, fechaFinalizacion: e.target.value })}
-                    className={orderFormErrors.fechaFinalizacion ? "border-red-500" : ""}
                   />
-                  {orderFormErrors.fechaFinalizacion && (
-                    <p className="text-red-500 text-xs">{orderFormErrors.fechaFinalizacion}</p>
-                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="horasTrabajadas">Horas Trabajadas</Label>
@@ -2020,7 +1830,7 @@ export default function DashboardPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="costoRepuestos">Costo Repuestos (Bs)</Label>
+                  <Label htmlFor="costoRepuestos">Costo Repuestos ($)</Label>
                   <Input
                     id="costoRepuestos"
                     type="number"
@@ -2030,7 +1840,7 @@ export default function DashboardPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="costoTotal">Costo Total (Bs)</Label>
+                  <Label htmlFor="costoTotal">Costo Total ($)</Label>
                   <Input
                     id="costoTotal"
                     type="number"
@@ -2039,6 +1849,16 @@ export default function DashboardPage() {
                     onChange={(e) => setNewOrderData({ ...newOrderData, costoTotal: Number(e.target.value) })}
                   />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="observaciones">Observaciones</Label>
+                <Textarea
+                  id="observaciones"
+                  placeholder="Observaciones adicionales..."
+                  value={newOrderData.observaciones || ""}
+                  onChange={(e) => setNewOrderData({ ...newOrderData, observaciones: e.target.value })}
+                  rows={3}
+                />
               </div>
             </div>
             <DialogFooter>
@@ -2054,10 +1874,10 @@ export default function DashboardPage() {
 
         {/* Order Details Dialog */}
         <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" aria-describedby="order-details-desc">
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Detalles de la Orden</DialogTitle>
-              <DialogDescription id="order-details-desc">{selectedOrder?.numeroOrden}</DialogDescription>
+              <DialogDescription>{selectedOrder?.numeroOrden}</DialogDescription>
             </DialogHeader>
             {selectedOrder && (
               <div className="space-y-6">
@@ -2084,15 +1904,15 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <Label className="text-sm font-medium text-gray-500">Fecha de Creación</Label>
-                    <p className="text-base">{formatDate(selectedOrder.fechaCreacion)}</p>
+                    <p className="text-base">{selectedOrder.fechaCreacion}</p>
                   </div>
                   <div>
                     <Label className="text-sm font-medium text-gray-500">Fecha de Inicio</Label>
-                    <p className="text-base">{formatDate(selectedOrder.fechaInicio) || "-"}</p>
+                    <p className="text-base">{selectedOrder.fechaInicio || "-"}</p>
                   </div>
                   <div>
                     <Label className="text-sm font-medium text-gray-500">Fecha de Finalización</Label>
-                    <p className="text-base">{formatDate(selectedOrder.fechaFinalizacion) || "-"}</p>
+                    <p className="text-base">{selectedOrder.fechaFinalizacion || "-"}</p>
                   </div>
                 </div>
                 <div>
@@ -2107,12 +1927,17 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <Label className="text-sm font-medium text-gray-500">Costo Repuestos</Label>
-                    <p className="text-base">Bs {Number(selectedOrder.costoRepuestos || 0).toFixed(2)}</p>
+                    <p className="text-base">${Number(selectedOrder.costoRepuestos || 0).toFixed(2)}</p>
                   </div>
                   <div>
                     <Label className="text-sm font-medium text-gray-500">Costo Total</Label>
-                    <p className="text-base font-semibold">Bs {Number(selectedOrder.costoTotal || 0).toFixed(2)}</p>
+                    <p className="text-base font-semibold">${Number(selectedOrder.costoTotal || 0).toFixed(2)}</p>
                   </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Observaciones</Label>
+                  <p className="text-base mt-1">{selectedOrder.observaciones || "-"}</p>
                 </div>
               </div>
             )}
@@ -2126,10 +1951,10 @@ export default function DashboardPage() {
 
         {/* Assign Technician Dialog */}
         <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
-          <DialogContent className="sm:max-w-[500px]" aria-describedby="assign-tech-desc">
+          <DialogContent className="sm:max-w-[500px]">
             <DialogHeader>
               <DialogTitle>Asignar Técnico</DialogTitle>
-              <DialogDescription id="assign-tech-desc">Selecciona un técnico para la orden {selectedOrder?.numeroOrden}</DialogDescription>
+              <DialogDescription>Selecciona un técnico para la orden {selectedOrder?.numeroOrden}</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <Select onValueChange={(value) => setSelectedTechnicianId(Number(value))}>
@@ -2189,10 +2014,10 @@ export default function DashboardPage() {
 
         {/* Change Status Dialog */}
         <Dialog open={isStatusDialogOpen} onOpenChange={setIsStatusDialogOpen}>
-          <DialogContent aria-describedby="status-change-desc">
+          <DialogContent>
             <DialogHeader>
               <DialogTitle>Cambiar Estado</DialogTitle>
-              <DialogDescription id="status-change-desc">Actualiza el estado de la orden {selectedOrder?.numeroOrden}</DialogDescription>
+              <DialogDescription>Actualiza el estado de la orden {selectedOrder?.numeroOrden}</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <Select onValueChange={setNewStatus}>
@@ -2207,6 +2032,18 @@ export default function DashboardPage() {
                   <SelectItem value="pospuesta">Pospuesta</SelectItem>
                 </SelectContent>
               </Select>
+              <div className="space-y-2">
+                <label htmlFor="observaciones" className="text-sm font-medium">
+                  Observaciones (opcional)
+                </label>
+                <Textarea
+                  id="observaciones"
+                  placeholder="Agregar observaciones sobre el cambio de estado..."
+                  value={statusObservaciones}
+                  onChange={(e) => setStatusObservaciones(e.target.value)}
+                  rows={3}
+                />
+              </div>
             </div>
             <DialogFooter>
               <Button
@@ -2214,6 +2051,7 @@ export default function DashboardPage() {
                 onClick={() => {
                   setIsStatusDialogOpen(false)
                   setNewStatus("")
+                  setStatusObservaciones("")
                 }}
               >
                 Cancelar
@@ -2272,6 +2110,54 @@ export default function DashboardPage() {
               </Button>
               <Button variant="destructive" onClick={confirmDeleteEquipment} disabled={equipmentLoading}>
                 {equipmentLoading ? "Eliminando..." : "Eliminar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* USER DELETE CONFIRMATION DIALOG */}
+        <Dialog open={isDeleteUserDialogOpen} onOpenChange={setIsDeleteUserDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Confirmar Eliminación</DialogTitle>
+              <DialogDescription>
+                ¿Está seguro de que desea eliminar este usuario? Esta acción no se puede deshacer.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsDeleteUserDialogOpen(false)
+                  setSelectedUserToDelete(null)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={async () => {
+                  if (!selectedUserToDelete) return
+
+                  const result = await removeUsuario(selectedUserToDelete)
+                  if (result.success) {
+                    toast({
+                      title: "Usuario eliminado",
+                      description: "El usuario ha sido eliminado exitosamente",
+                    })
+                    setIsDeleteUserDialogOpen(false)
+                    setSelectedUserToDelete(null)
+                    await loadUsers()
+                  } else {
+                    toast({
+                      variant: "destructive",
+                      title: "Error al eliminar",
+                      description: result.error || "No se pudo eliminar el usuario",
+                    })
+                  }
+                }}
+              >
+                Eliminar
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -2416,136 +2302,36 @@ export default function DashboardPage() {
   }
 
   const handleSaveEquipment = async () => {
-    // Validate form
     const errors: Record<string, string> = {}
 
-    // Codigo Institucional validation
-    if (!equipmentForm.codigoInstitucional || equipmentForm.codigoInstitucional.trim() === "") {
-      errors.codigoInstitucional = "El código institucional es obligatorio"
-    } else if (!/^\d{12}$/.test(equipmentForm.codigoInstitucional)) {
-      errors.codigoInstitucional = "El código institucional debe tener exactamente 12 dígitos"
-    }
-
-    // Número de Serie - Mínimo 3 caracteres
     if (!equipmentForm.numeroSerie || equipmentForm.numeroSerie.trim() === "") {
       errors.numeroSerie = "El número de serie es requerido"
-    } else if (equipmentForm.numeroSerie.trim().length < 3) {
-      errors.numeroSerie = "El número de serie debe tener al menos 3 caracteres"
     }
-
-    // Nombre del Equipo - Mínimo 3 caracteres
     if (!equipmentForm.nombre || equipmentForm.nombre.trim() === "") {
       errors.nombre = "El nombre del equipo es requerido"
-    } else if (equipmentForm.nombre.trim().length < 3) {
-      errors.nombre = "El nombre del equipo debe tener al menos 3 caracteres"
     }
-
-    // Fabricante - Requerido
     if (!equipmentForm.fabricante || equipmentForm.fabricante.trim() === "") {
       errors.fabricante = "El fabricante es requerido"
     }
-
-    // Modelo - Requerido
     if (!equipmentForm.modelo || equipmentForm.modelo.trim() === "") {
       errors.modelo = "El modelo es requerido"
     }
-
-    // Ubicaci��n - Requerida
     if (!equipmentForm.ubicacion || equipmentForm.ubicacion.trim() === "") {
       errors.ubicacion = "La ubicación es requerida"
     }
-
-    if (!equipmentForm.servicio || equipmentForm.servicio.trim() === "") {
-      errors.servicio = "El servicio es obligatorio"
-    } else if (equipmentForm.servicio.trim().length < 3) {
-      errors.servicio = "El servicio debe tener al menos 3 caracteres"
+    if (!equipmentForm.fechaInstalacion) {
+      // Changed from fechaAdquisicion to fechaInstalacion based on form field
+      errors.fechaInstalacion = "La fecha de instalación es requerida"
     }
-
-    if (!equipmentForm.nivelRiesgo || equipmentForm.nivelRiesgo.trim() === "") {
-      errors.nivelRiesgo = "El nivel de riesgo es obligatorio"
+    if (!equipmentForm.estado) {
+      errors.estado = "Debe seleccionar un estado"
     }
-
-    // Validación de Fechas Lógicas
-    if (equipmentForm.fechaRetiro && equipmentForm.fechaInstalacion) {
-      const fechaRetiro = new Date(equipmentForm.fechaRetiro)
-      const fechaInstalacion = new Date(equipmentForm.fechaInstalacion)
-      if (fechaInstalacion > fechaRetiro) {
-        errors.fechaInstalacion = "La fecha de instalación debe ser anterior a la fecha de adquisición"
-      }
-    }
-
-    // Vencimiento de Garantía debe ser futuro
-    if (equipmentForm.vencimientoGarantia) {
-      const vencimiento = new Date(equipmentForm.vencimientoGarantia)
-      const hoy = new Date()
-      hoy.setHours(0, 0, 0, 0)
-      if (vencimiento < hoy) {
-        errors.vencimientoGarantia = "El vencimiento de garantía debe ser una fecha futura"
-      }
-    }
-
-    // Teléfono del Proveedor - Formato válido si se proporciona
-    if (equipmentForm.proveedorTelefono && equipmentForm.proveedorTelefono.trim() !== "") {
-      const phoneRegex = /^[\d\s\-+()]{7,20}$/
-      if (!phoneRegex.test(equipmentForm.proveedorTelefono)) {
-        errors.proveedorTelefono = "Formato de teléfono inválido"
-      }
-    }
-
-    // Frecuencia - Validación
-    const isDC = equipmentForm.voltaje?.toUpperCase().includes("DC")
-
-    if (!isDC && equipmentForm.frecuencia && equipmentForm.frecuencia.trim() !== "") {
-      const frecuenciaValue = equipmentForm.frecuencia.trim()
-
-      // Valid formats: 50 Hz, 60 Hz, 50-60 Hz, 50–60 Hz (with en-dash)
-      const validFormatRegex = /^(50|60|50[-–]\s*60)\s*(Hz|hz)?$/i
-
-      if (!validFormatRegex.test(frecuenciaValue)) {
-        errors.frecuencia = "Formato válido: 50 Hz, 60 Hz o 50-60 Hz"
-      } else {
-        // Extract numeric values to validate range (49-61 Hz)
-        const numericMatch = frecuenciaValue.match(/\d+/g)
-        if (numericMatch) {
-          const values = numericMatch.map(Number)
-          const outOfRange = values.some((val) => val < 49 || val > 61)
-
-          if (outOfRange) {
-            errors.frecuencia = "La frecuencia debe estar entre 49-61 Hz"
-          }
-        }
-      }
-    }
-
-    // Estado del Equipo - Requerido
     if (!equipmentForm.estadoEquipo) {
       errors.estadoEquipo = "Debe seleccionar un estado del equipo"
     }
 
-    // Estado - Requerido
-    if (!equipmentForm.estado) {
-      errors.estado = "Debe seleccionar un estado"
-    }
-
-    // Si hay errores, mostrarlos y hacer scroll al primer campo con error
     if (Object.keys(errors).length > 0) {
       setEquipmentFormErrors(errors)
-
-      // Auto-scroll al primer campo con error
-      const firstErrorField = Object.keys(errors)[0]
-      setTimeout(() => {
-        const element = document.getElementById(firstErrorField)
-        if (element) {
-          element.scrollIntoView({ behavior: "smooth", block: "center" })
-          element.focus()
-        }
-      }, 100)
-
-      toast({
-        variant: "destructive",
-        title: "Error de validación",
-        description: "Por favor corrija los errores en el formulario antes de guardar",
-      })
       return
     }
 
@@ -2566,75 +2352,13 @@ export default function DashboardPage() {
         })
         setShowEquipmentForm(false)
         resetEquipmentForm()
-        
-        // Clear equipment cache to force refresh
-        const { clearCache } = await import("@/lib/utils/module-loader")
-        clearCache() // Clear all cache to ensure fresh data
-        
         await loadEquipment()
       } else {
-        const backendErrors: Record<string, string> = {}
-
-        // Parse backend validation errors
-        if (result.error) {
-          try {
-            // Try to parse JSON error response
-            const errorMatch = result.error.match(/\{.*\}/)
-            if (errorMatch) {
-              const errorData = JSON.parse(errorMatch[0])
-
-              // Map backend field names to frontend field names
-              const fieldMapping: Record<string, string> = {
-                codigo_institucional: "codigoInstitucional",
-                fecha_ingreso: "fechaIngreso",
-                fecha_adquisicion: "fechaAdquisicion",
-                fecha_instalacion: "fechaInstalacion",
-                fecha_vencimiento_garantia: "fechaVencimientoGarantia",
-                numero_serie: "numeroSerie",
-                estado_equipo: "estadoEquipo",
-                nivel_riesgo: "nivelRiesgo",
-              }
-
-              if (errorData.errors) {
-                // Process each error field
-                Object.entries(errorData.errors).forEach(([backendField, messages]) => {
-                  const frontendField = fieldMapping[backendField] || backendField
-                  const errorMessages = Array.isArray(messages) ? messages : [messages]
-                  backendErrors[frontendField] = errorMessages[0]
-                })
-              }
-            }
-          } catch (e) {
-            // If parsing fails, handle specific known errors
-            if (result.error.includes("codigo_institucional")) {
-              backendErrors.codigoInstitucional = "Este código institucional ya está registrado"
-            } else if (result.error.includes("fecha_ingreso")) {
-              backendErrors.fechaIngreso = "La fecha de ingreso no puede ser futura"
-            } else {
-              backendErrors.general = result.error
-            }
-          }
-        }
-
-        setEquipmentFormErrors(backendErrors)
-
-        // Scroll to first error field
-        const firstErrorField = Object.keys(backendErrors)[0]
-        if (firstErrorField && firstErrorField !== "general") {
-          setTimeout(() => {
-            const element = document.getElementById(firstErrorField)
-            if (element) {
-              element.scrollIntoView({ behavior: "smooth", block: "center" })
-              element.focus()
-            }
-          }, 100)
-        }
-
+        setEquipmentFormErrors({ general: result.error || "Error al guardar el equipo" })
         toast({
           variant: "destructive",
           title: "Error al guardar equipo",
-          description:
-            backendErrors[Object.keys(backendErrors)[0]] || "No se pudo guardar el equipo. Por favor intente de nuevo.",
+          description: result.error || "No se pudo guardar el equipo. Por favor intente de nuevo.",
         })
       }
     } catch (error) {
@@ -2643,7 +2367,7 @@ export default function DashboardPage() {
       toast({
         variant: "destructive",
         title: "Error de conexión",
-        description: "No se pudo conectar con el servidor. Verifique su conexión e intente nuevamente.",
+        description: "No se pudo conectar al servidor para guardar el equipo.",
       })
     } finally {
       setEquipmentLoading(false)
@@ -2673,11 +2397,6 @@ export default function DashboardPage() {
         setIsDeleteEquipmentDialogOpen(false)
         setSelectedEquipmentToDelete(null)
         setShowEquipmentDetails(false) // Close details if open
-        
-        // Clear equipment cache to force refresh
-        const { clearCache } = await import("@/lib/utils/module-loader")
-        clearCache() // Clear all cache to ensure fresh data
-        
         await loadEquipment()
       } else {
         toast({
@@ -2727,69 +2446,59 @@ export default function DashboardPage() {
     }
   }
 
-  // CHANGE: Simplified handleFileUpload - remove complex dependencies
+  // CHANGE: handleFileUpload function
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file || !selectedEquipment?.id) {
-      console.error("[v0] handleFileUpload - File or equipment missing")
+    if (!file || !selectedEquipment) {
       return
     }
 
     try {
       setEquipmentLoading(true)
-      const userId = localStorage.getItem("userId") || "1"
-      const authToken = localStorage.getItem("authToken")
-      
-      const formData = new FormData()
-      formData.append("archivo", file)
-      formData.append("subido_por_id", userId)
-      
-      const headers: Record<string, string> = {
-        "X-User-ID": userId,
+      const token = localStorage.getItem("authToken")
+      const userId = localStorage.getItem("userId")
+
+      if (!token) {
+        throw new Error("No authentication token found. Please log in again.")
       }
-      if (authToken) {
-        headers["Authorization"] = `Bearer ${authToken}`
-      }
-      
-      console.error("[v0] handleFileUpload - Starting upload:", {
-        fileName: file.name,
-        fileSize: file.size,
-        equipmentId: selectedEquipment.id,
-        userId: userId,
+
+      // Use the lib/api/documentos uploadDocumento function
+      const { uploadDocumento } = await import("@/lib/api/documentos")
+      const newDoc = await uploadDocumento(
+        selectedEquipment.id,
+        file,
+        userId ? Number.parseInt(userId) : 1, // Default to 1 if userId is not found, though this should be handled by authentication
+        token,
+      )
+
+      // Fetch updated equipment details to refresh the list of documents
+      const { getEquipo } = await import("@/lib/api/equipos")
+      const updatedEquipment = await getEquipo(selectedEquipment.id)
+
+      const transformedEquipment = transformEquipoToEquipment(updatedEquipment)
+
+      setSelectedEquipment(transformedEquipment)
+
+      // Update equipment list in the main view as well
+      setEquipment(equipment.map((eq) => (eq.id === selectedEquipment.id ? transformedEquipment : eq)))
+
+      toast({
+        title: "Documento subido",
+        description: `El archivo ${file.name} se ha subido exitosamente.`,
       })
-      
-      const response = await fetch(`/api/equipos/${selectedEquipment.id}/documentos`, {
-        method: "POST",
-        credentials: "include",
-        headers,
-        body: formData,
-      })
-      
-      console.error("[v0] handleFileUpload - Response status:", response.status)
-      
-      if (!response.ok) {
-        const errorData = await response.text()
-        console.error("[v0] handleFileUpload - Error response:", response.status, errorData)
-        throw new Error(errorData || "Error uploading file")
-      }
-      
-      const result = await response.json()
-      console.error("[v0] handleFileUpload - Upload successful, result:", result)
-      
-      toast({ title: "Éxito", description: `${file.name} subido correctamente` })
-      
-      // Refresh equipment details to show new document
-      // Use handleViewEquipmentDetails to reload with proper transformation
-      if (selectedEquipment?.id) {
-        console.error("[v0] handleFileUpload - Reloading equipment details...")
-        await handleViewEquipmentDetails(selectedEquipment)
-      }
     } catch (error) {
-      console.error("[v0] handleFileUpload - Upload error:", error)
-      toast({ variant: "destructive", title: "Error", description: "Error al subir documento" })
+      console.error("[v0] Error uploading document:", error)
+      toast({
+        variant: "destructive",
+        title: "Error al subir documento",
+        description: error instanceof Error ? error.message : "Ocurrió un error al subir el archivo.",
+      })
     } finally {
       setEquipmentLoading(false)
-      if (e.target) e.target.value = ""
+      // Reset file input
+      if (e.target) {
+        e.target.value = ""
+      }
     }
   }
 
@@ -2922,27 +2631,6 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        <Card className="mb-6">
-          <CardContent className="p-6">
-            <h3 className="text-lg font-semibold mb-4">Fabricantes Actuales</h3>
-            <div className="flex flex-wrap gap-2">
-              {configManufacturers.length > 0 ? (
-                configManufacturers.map((manufacturer, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-2 bg-blue-100 text-blue-800 px-4 py-2 rounded-full text-sm font-medium"
-                  >
-                    <Briefcase className="h-4 w-4" />
-                    {manufacturer}
-                  </div>
-                ))
-              ) : (
-                <p className="text-gray-400">No hay fabricantes configurados</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardContent className="p-6">
@@ -3037,12 +2725,7 @@ export default function DashboardPage() {
                   id="codigoInstitucional"
                   placeholder="Ej: TX-001"
                   value={equipmentForm.codigoInstitucional || ""}
-                  onChange={(e) => {
-                    const value = e.target.value.replace(/\D/g, "").slice(0, 12)
-                    setEquipmentForm({ ...equipmentForm, codigoInstitucional: value })
-                  }}
-                  maxLength={12}
-                  inputMode="numeric"
+                  onChange={(e) => setEquipmentForm({ ...equipmentForm, codigoInstitucional: e.target.value })}
                 />
               </div>
 
@@ -3256,9 +2939,6 @@ export default function DashboardPage() {
                     <SelectItem value="no_operable">No Operable</SelectItem>
                   </SelectContent>
                 </Select>
-                {equipmentFormErrors.estadoEquipo && (
-                  <p className="text-red-500 text-xs">{equipmentFormErrors.estadoEquipo}</p>
-                )}
               </div>
 
               <div className="space-y-2">
@@ -3276,9 +2956,6 @@ export default function DashboardPage() {
                     <SelectItem value="bajo">Bajo</SelectItem>
                   </SelectContent>
                 </Select>
-                {equipmentFormErrors.nivelRiesgo && (
-                  <p className="text-red-500 text-xs">{equipmentFormErrors.nivelRiesgo}</p>
-                )}
               </div>
 
               {/* CHANGE: Updated manual checkboxes */}
@@ -3538,7 +3215,7 @@ export default function DashboardPage() {
                       equipo, // Use .items from the memoized result
                     ) => (
                       <tr key={equipo.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4 text-sm text-gray-600 font-mono">{equipo.id}</td>
+                        <td className="py-3 px-4 text-sm">{equipo.id}</td>
                         <td className="py-3 px-4 text-sm">{equipo.numeroSerie}</td>
                         <td className="py-3 px-4 text-sm">{equipo.codigoInstitucional || "-"}</td>
                         <td className="py-3 px-4 text-sm font-medium">{equipo.nombre}</td>
@@ -3769,6 +3446,60 @@ export default function DashboardPage() {
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-lg font-medium">Documentos Asociados</h3>
+                  <Button size="sm" variant="outline" onClick={() => document.getElementById("fileInput")?.click()}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Subir Archivo
+                  </Button>
+                  <input
+                    id="fileInput"
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={handleFileUpload}
+                    style={{ display: "none" }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  {(selectedEquipment.documentos || []).length > 0 ? (
+                    (selectedEquipment.documentos || []).map((doc, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-blue-600" />
+                          <span>{doc.nombre || "N/A"}</span>
+                          <Badge variant="outline">{doc.tipo || "N/A"}</Badge>
+                          {doc.fechaSubida && <span className="text-xs text-gray-500">({doc.fechaSubida})</span>}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleViewDocument(doc)}
+                            title="Ver documento"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDownloadDocument(doc)}
+                            title="Descargar documento"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 bg-transparent"
+                            onClick={() => doc.id && handleDeleteDocument(doc.id, index)}
+                            title="Eliminar documento"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-gray-500 text-sm">No hay documentos asociados.</p>
+                  )}
                 </div>
               </div>
 
@@ -3935,7 +3666,7 @@ export default function DashboardPage() {
                   <tbody>
                     {paginatedUsers.map((user) => (
                       <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="p-3 text-sm text-gray-600 font-mono">{user.id}</td>
+                        <td className="p-3 text-sm">{user.id}</td>
                         <td className="p-3 text-sm font-medium">{user.nombre}</td>
                         <td className="p-3 text-sm text-gray-600">{user.email}</td>
                         <td className="p-3 text-sm">
@@ -4152,7 +3883,6 @@ export default function DashboardPage() {
               setNewUser({ estado: "Activo" })
               setUserFormErrors({})
             }
-            // When editing, useEffect will handle syncing the form
           }}
         >
           <DialogContent className="max-w-2xl">
@@ -4201,7 +3931,7 @@ export default function DashboardPage() {
                       setUserFormErrors({ ...userFormErrors, contrasena: "" })
                     }}
                     placeholder="Mínimo 6 caracteres"
-                    required
+                    required={!editingUser}
                   />
                   {userFormErrors.contrasena && <p className="text-red-500 text-xs">{userFormErrors.contrasena}</p>}
                 </div>
@@ -4229,9 +3959,7 @@ export default function DashboardPage() {
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar rol">
-                      {newUser.rol || "Seleccionar rol"}
-                    </SelectValue>
+                    <SelectValue placeholder="Seleccionar rol" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Técnico">Técnico</SelectItem>
@@ -4382,8 +4110,175 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {/* Permissions Section */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-medium">Permisos</h3>
+                  {userRole === "administrador" && (
+                    <Button
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                      onClick={() => {
+                        setEditingPermissions(selectedUser)
+                        if (selectedUser?.permissions && Object.keys(selectedUser.permissions).length > 0) {
+                          setUserPermissions({
+                            gestionEquipos: selectedUser.permissions.gestionEquipos ?? false,
+                            gestionUsuarios: selectedUser.permissions.gestionUsuarios ?? false,
+                            ordenesTrabajoCrear: selectedUser.permissions.ordenesTrabajoCrear ?? false,
+                            ordenesTrabajoAsignar: selectedUser.permissions.ordenesTrabajoAsignar ?? false,
+                            ordenesTrabajoEjecutar: selectedUser.permissions.ordenesTrabajoEjecutar ?? false,
+                            mantenimientoPreventivo: selectedUser.permissions.mantenimientoPreventivo ?? false,
+                            reportesGenerar: selectedUser.permissions.reportesGenerar ?? false,
+                            reportesVer: selectedUser.permissions.reportesVer ?? false,
+                            logsAcceso: selectedUser.permissions.logsAcceso ?? false,
+                            configuracionSistema: selectedUser.permissions.configuracionSistema ?? false,
+                          })
+                        } else {
+                          const roleKey = selectedUser?.rol?.toLowerCase() as RoleType | undefined
+                          if (roleKey && DEFAULT_PERMISSIONS_BY_ROLE[roleKey]) {
+                            setUserPermissions(DEFAULT_PERMISSIONS_BY_ROLE[roleKey])
+                          }
+                        }
+                        setShowPermissionsDialog(true)
+                      }}
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Editar Permisos
+                    </Button>
+                  )}
+                </div>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                  {(() => {
+                    const perms =
+                      selectedUser?.permissions && Object.keys(selectedUser.permissions).length > 0
+                        ? selectedUser.permissions
+                        : selectedUser?.rol
+                          ? DEFAULT_PERMISSIONS_BY_ROLE[selectedUser.rol.toLowerCase() as RoleType]
+                          : DEFAULT_PERMISSIONS_BY_ROLE.tecnico
 
+                    return (
+                      <>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm">Gestión de Equipos</span>
+                          <span
+                            className={`text-sm font-medium ${perms?.gestionEquipos ? "text-green-600" : "text-red-600"}`}
+                          >
+                            {perms?.gestionEquipos ? "Sí" : "No"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm">Gestión de Usuarios</span>
+                          <span
+                            className={`text-sm font-medium ${perms?.gestionUsuarios ? "text-green-600" : "text-red-600"}`}
+                          >
+                            {perms?.gestionUsuarios ? "Sí" : "No"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm">Crear Órdenes de Trabajo</span>
+                          <span
+                            className={`text-sm font-medium ${perms?.ordenesTrabajoCrear ? "text-green-600" : "text-red-600"}`}
+                          >
+                            {perms?.ordenesTrabajoCrear ? "Sí" : "No"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm">Asignar Órdenes de Trabajo</span>
+                          <span
+                            className={`text-sm font-medium ${perms?.ordenesTrabajoAsignar ? "text-green-600" : "text-red-600"}`}
+                          >
+                            {perms?.ordenesTrabajoAsignar ? "Sí" : "No"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm">Mantenimiento Preventivo</span>
+                          <span
+                            className={`text-sm font-medium ${perms?.mantenimientoPreventivo ? "text-green-600" : "text-red-600"}`}
+                          >
+                            {perms?.mantenimientoPreventivo ? "Sí" : "No"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm">Generar Reportes</span>
+                          <span
+                            className={`text-sm font-medium ${perms?.reportesGenerar ? "text-green-600" : "text-red-600"}`}
+                          >
+                            {perms?.reportesGenerar ? "Sí" : "No"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm">Acceso a Logs</span>
+                          <span
+                            className={`text-sm font-medium ${perms?.logsAcceso ? "text-green-600" : "text-red-600"}`}
+                          >
+                            {perms?.logsAcceso ? "Sí" : "No"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm">Configuración del Sistema</span>
+                          <span
+                            className={`text-sm font-medium ${perms?.configuracionSistema ? "text-green-600" : "text-red-600"}`}
+                          >
+                            {perms?.configuracionSistema ? "Sí" : "No"}
+                          </span>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
+              </div>
 
+              {/* Activity Section */}
+              <div>
+                <h3 className="text-lg font-medium mb-3">Actividades Recientes</h3>
+                {loadingUserActivity ? (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-600">Cargando actividad...</p>
+                  </div>
+                ) : userActivity ? (
+                  <div className="bg-gray-50 p-4 rounded-lg space-y-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Último acceso:</p>
+                      <p className="text-sm text-gray-600">{userActivity.ultimo_acceso || "Sin registro"}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Órdenes de trabajo creadas:</p>
+                      <p className="text-sm text-gray-600">{userActivity.ordenes_creadas}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Órdenes de trabajo asignadas:</p>
+                      <p className="text-sm text-gray-600">{userActivity.ordenes_asignadas}</p>
+                    </div>
+
+                    {userActivity.actividades_recientes.length > 0 && (
+                      <div className="mt-4">
+                        <p className="text-sm font-medium text-gray-700 mb-2">Últimas actividades:</p>
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {userActivity.actividades_recientes.map((actividad: any) => (
+                            <div key={actividad.id} className="bg-white p-2 rounded border border-gray-200">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium text-gray-900">{actividad.accion}</p>
+                                  <p className="text-xs text-gray-600 truncate">{actividad.descripcion}</p>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <span className="text-xs text-gray-500">{actividad.modulo}</span>
+                                    <span className="text-xs text-gray-400">•</span>
+                                    <span className="text-xs text-gray-500">{actividad.timestamp}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-600">No se pudo cargar la actividad del usuario.</p>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex justify-end gap-2 mt-6">
               <Button
@@ -4415,7 +4310,153 @@ export default function DashboardPage() {
           </DialogContent>
         </Dialog>
 
+        {/* Permissions Dialog */}
+        <Dialog open={showPermissionsDialog} onOpenChange={setShowPermissionsDialog}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Editar Permisos - {editingPermissions?.nombre}</DialogTitle>
+              <p className="text-sm text-gray-600 mt-2">
+                Rol: <span className="font-medium">{editingPermissions?.rol}</span>
+              </p>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Gestión de Equipos</Label>
+                  <p className="text-xs text-gray-600">Ver, crear, editar y eliminar equipos</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={userPermissions.gestionEquipos}
+                  onChange={(e) => setUserPermissions({ ...userPermissions, gestionEquipos: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
 
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Gestión de Usuarios</Label>
+                  <p className="text-xs text-gray-600">Crear, editar y eliminar usuarios del sistema</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={userPermissions.gestionUsuarios}
+                  onChange={(e) => setUserPermissions({ ...userPermissions, gestionUsuarios: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Crear Órdenes de Trabajo</Label>
+                  <p className="text-xs text-gray-600">Crear nuevas órdenes de trabajo</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={userPermissions.ordenesTrabajoCrear}
+                  onChange={(e) => setUserPermissions({ ...userPermissions, ordenesTrabajoCrear: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Asignar Órdenes de Trabajo</Label>
+                  <p className="text-xs text-gray-600">Asignar órdenes a técnicos</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={userPermissions.ordenesTrabajoAsignar}
+                  onChange={(e) => setUserPermissions({ ...userPermissions, ordenesTrabajoAsignar: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Mantenimiento Preventivo</Label>
+                  <p className="text-xs text-gray-600">Programar y ejecutar mantenimientos preventivos</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={userPermissions.mantenimientoPreventivo}
+                  onChange={(e) =>
+                    setUserPermissions({ ...userPermissions, mantenimientoPreventivo: e.target.checked })
+                  }
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Generar Reportes</Label>
+                  <p className="text-xs text-gray-600">Crear y exportar reportes del sistema</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={userPermissions.reportesGenerar}
+                  onChange={(e) => setUserPermissions({ ...userPermissions, reportesGenerar: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Acceso a Logs</Label>
+                  <p className="text-xs text-gray-600">Ver registros de auditoría del sistema</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={userPermissions.logsAcceso}
+                  onChange={(e) => setUserPermissions({ ...userPermissions, logsAcceso: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <Label className="text-sm font-medium">Configuración del Sistema</Label>
+                  <p className="text-xs text-gray-600">Modificar configuraciones globales</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={userPermissions.configuracionSistema}
+                  onChange={(e) => setUserPermissions({ ...userPermissions, configuracionSistema: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <Button variant="outline" onClick={() => setShowPermissionsDialog(false)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!editingPermissions) return
+
+                  setUsersLoading(true)
+                  const result = await updatePermissions(editingPermissions.id, userPermissions)
+
+                  if (result.success) {
+                    await loadUsers()
+                    if (selectedUser?.id === editingPermissions.id) {
+                      setSelectedUser({ ...selectedUser, permissions: userPermissions })
+                    }
+                    setShowPermissionsDialog(false)
+                    alert("Permisos actualizados correctamente")
+                  } else {
+                    alert(result.error || "Error al actualizar permisos")
+                  }
+                  setUsersLoading(false)
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={usersLoading}
+              >
+                {usersLoading ? "Guardando..." : "Guardar Permisos"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Reset Password Dialog */}
         <Dialog open={showResetPassword} onOpenChange={setShowResetPassword}>
@@ -4512,7 +4553,7 @@ export default function DashboardPage() {
   }
 
   // --- Maintenance Rendering Functions ---
-  const isOverdue = (dateString: string | Date | undefined): boolean => {
+  const isOverdue = (dateString: string | undefined): boolean => {
     if (!dateString) return false
     try {
       const today = new Date()
@@ -4538,7 +4579,7 @@ export default function DashboardPage() {
     }
   }
 
-  const isUpcoming = (dateString: string | Date | undefined): boolean => {
+  const isUpcoming = (dateString: string | undefined): boolean => {
     if (!dateString) return false
     try {
       const today = new Date()
@@ -4574,8 +4615,6 @@ export default function DashboardPage() {
         return "bg-yellow-100 text-yellow-800"
       case "vencido":
         return "bg-red-100 text-red-800"
-      case "próximo":
-        return "bg-blue-100 text-blue-800"
       default:
         return "bg-gray-100 text-gray-800"
     }
@@ -4670,15 +4709,28 @@ export default function DashboardPage() {
 
   const renderCalendar = () => {
     return (
-      <MonthlyMaintenanceCalendar
+      <SmartMaintenanceCalendar
         maintenances={maintenanceSchedules}
         currentMonth={currentMonth}
         onMonthChange={setCurrentMonth}
-        onDateSelect={(date) => {
+        onDateSelect={(date, suggestion) => {
           const dateStr = date.toISOString().split('T')[0]
-          setSelectedMaintenance(null)
-          setMaintenanceForm({ proximaFecha: dateStr })
+          setMaintenanceForm({ ...maintenanceForm, proximaFecha: dateStr })
           setShowMaintenanceForm(true)
+          
+          // Show suggestion if available
+          if (suggestion && suggestion.isSuggested) {
+            toast({
+              title: "Excelente opción",
+              description: "Este día tiene disponibilidad. Completa el formulario para confirmar.",
+            })
+          } else if (suggestion?.isOverloaded) {
+            toast({
+              variant: "destructive",
+              title: "Día sobrecargado",
+              description: `Hay ${suggestion.maintenanceCount} mantenimientos programados. Considera otro día.`,
+            })
+          }
         }}
         onMaintenanceClick={(maintenance) => {
           setSelectedMaintenance(maintenance as any)
@@ -4691,32 +4743,23 @@ export default function DashboardPage() {
 
   // Maintenance management functions
   const resetMaintenanceForm = () => {
-    setMaintenanceForm({})
+    setMaintenanceForm({ resultado: "pendiente" })
     setMaintenanceFormErrors({})
   }
 
   const handleEditMaintenance = (maintenance: Mantenimiento) => {
-    // Format dates for the input (YYYY-MM-DD format)
-    const formatDateForInput = (dateString: any) => {
-      if (!dateString) return ""
-      try {
-        const date = new Date(dateString)
-        return date.toISOString().split('T')[0]
-      } catch {
-        return ""
-      }
-    }
-
     setSelectedMaintenance(maintenance)
     setMaintenanceForm({
-      equipoId: maintenance.equipo_id || maintenance.equipoId,
+      equipoId: (maintenance as any).equipo_id || (maintenance as any).equipoId,
       tipo: maintenance.tipo,
       frecuencia: maintenance.frecuencia,
-      proximaFecha: formatDateForInput(maintenance.proxima_programada || maintenance.proximaFecha),
-      ultimaFecha: formatDateForInput(maintenance.ultima_realizacion || maintenance.ultimaFecha),
-      observaciones: maintenance.observaciones || maintenance.descripcion,
+      proximaFecha: (maintenance as any).proxima_programada || (maintenance as any).proximaFecha,
+      ultimaFecha: (maintenance as any).ultima_realizacion || (maintenance as any).ultimaFecha,
+      resultado: (maintenance as any).resultado || "pendiente",
+      observaciones: (maintenance as any).observaciones || (maintenance as any).descripcion,
       descripcion: maintenance.descripcion,
       procedimiento: maintenance.procedimiento,
+      responsableId: (maintenance as any).creado_por || (maintenance as any).responsableId,
     })
     setShowMaintenanceForm(true)
     setMaintenanceFormErrors({})
@@ -4725,70 +4768,6 @@ export default function DashboardPage() {
   const handleDeleteMaintenance = async (id: number) => {
     setSelectedMaintenanceToDelete(id)
     setIsDeleteMaintenanceDialogOpen(true)
-  }
-
-  const handleCompleteMaintenance = async (maintenance: Mantenimiento) => {
-    setMaintenanceLoading(true)
-    try {
-      // First, complete the maintenance
-      const completeResult = await completeMantenimiento(
-        maintenance.id,
-        {
-          tiempo_real: undefined,
-          costo: undefined,
-          observaciones: `Mantenimiento completado automáticamente`,
-          estado_equipo: "operativo",
-        },
-        currentUser?.id || 1
-      )
-
-      if (!completeResult.success) {
-        toast({
-          variant: "destructive",
-          title: "Error al completar mantenimiento",
-          description: completeResult.error || "No se pudo completar el mantenimiento",
-        })
-        return
-      }
-
-      // Then create a work order automatically
-      const equipoNombre = typeof maintenance.equipo === "object" ? maintenance.equipo.nombre : maintenance.equipo || "Equipo desconocido"
-      
-      const ordenResult = await saveOrdenTrabajo({
-        equipo_id: maintenance.equipo_id,
-        tipo: maintenance.tipo || "Mantenimiento",
-        prioridad: "media",
-        descripcion: `Orden de trabajo generada automáticamente por la finalización del mantenimiento: ${maintenance.descripcion || "Mantenimiento programado"}`,
-        estado: "pendiente",
-        tiempo_estimado: null,
-        costo_estimado: null,
-      })
-
-      if (ordenResult.success) {
-        toast({
-          title: "Mantenimiento completado",
-          description: `Mantenimiento completado y orden de trabajo #${ordenResult.data?.numero_orden} creada`,
-        })
-      } else {
-        toast({
-          title: "Mantenimiento completado parcialmente",
-          description: "El mantenimiento fue completado pero hay problemas creando la orden de trabajo",
-        })
-      }
-
-      setShowMaintenanceDetails(false)
-      await loadMaintenanceSchedules()
-      await loadMaintenanceStats()
-    } catch (error) {
-      console.error("[v0] Error completing maintenance:", error)
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "No se pudo completar el mantenimiento",
-      })
-    } finally {
-      setMaintenanceLoading(false)
-    }
   }
 
   const confirmDeleteMaintenance = async () => {
@@ -4837,20 +4816,6 @@ export default function DashboardPage() {
     if (!maintenanceForm.frecuencia) errors.frecuencia = "La frecuencia es requerida"
     if (!maintenanceForm.proximaFecha) errors.proximaFecha = "La próxima fecha es requerida"
     if (!maintenanceForm.observaciones?.trim()) errors.observaciones = "Las observaciones son requeridas"
-
-    // Validate dates
-    if (maintenanceForm.proximaFecha && maintenanceForm.ultimaFecha) {
-      const proximaFecha = new Date(maintenanceForm.proximaFecha)
-      const ultimaFecha = new Date(maintenanceForm.ultimaFecha)
-      
-      if (ultimaFecha > proximaFecha) {
-        errors.ultimaFecha = "La última fecha debe ser anterior o igual a la próxima fecha"
-      }
-    }
-
-    if (maintenanceForm.ultimaFecha && !maintenanceForm.proximaFecha) {
-      errors.proximaFecha = "La próxima fecha es requerida si se establece una última fecha"
-    }
 
     if (Object.keys(errors).length > 0) {
       setMaintenanceFormErrors(errors)
@@ -4930,29 +4895,26 @@ export default function DashboardPage() {
               Calendario
             </Button>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={() => {
-                setShowMaintenanceForm(true)
-                setSelectedMaintenance(null)
-                setMaintenanceForm({ resultado: "pendiente" })
-                if (users.length === 0) {
-                  const loadUsers = async () => {
-                    try {
-                      const response = await fetchUsuarios({ per_page: 1000, estado: "activo" })
-                      setUsers(response.data)
-                    } catch (error) {
-                      console.error("Error loading users for maintenance form:", error)
-                    }
+          <Button
+            onClick={() => {
+              setShowMaintenanceForm(true)
+              setSelectedMaintenance(null)
+              setMaintenanceForm({ resultado: "pendiente" })
+              if (users.length === 0) {
+                const loadUsers = async () => {
+                  try {
+                    const response = await fetchUsuarios({ per_page: 1000, estado: "activo" })
+                    setUsers(response.data)
+                  } catch (error) {
+                    console.error("Error loading users for maintenance form:", error)
                   }
-                  loadUsers()
                 }
-              }}
-            >
-              <Plus className="h-4 w-4" />
-              Nuevo Mantenimiento
-            </Button>
-          </div>
+                loadUsers()
+              }
+            }}
+          >
+            Nuevo Mantenimiento
+          </Button>
         </div>
       </div>
 
@@ -5010,7 +4972,7 @@ export default function DashboardPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos los tipos</SelectItem>
-                  <SelectItem value="calibracion">Calibraci��n</SelectItem>
+                  <SelectItem value="calibracion">Calibración</SelectItem>
                   <SelectItem value="inspeccion">Inspección</SelectItem>
                   <SelectItem value="limpieza">Limpieza</SelectItem>
                 </SelectContent>
@@ -5051,7 +5013,6 @@ export default function DashboardPage() {
               <table className="w-full">
                 <thead className="bg-gray-100">
                   <tr>
-                    <th className="px-4 py-3 text-left font-medium text-gray-700">ID Mantenimiento</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-700">Nombre Equipo</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-700">Tipo</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-700">Frecuencia</th>
@@ -5064,7 +5025,6 @@ export default function DashboardPage() {
                 <tbody className="bg-white">
                   {maintenanceSchedules.map((m: any) => (
                     <tr key={m.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-2 text-sm text-gray-600 font-mono">{m.id}</td>
                       <td className="px-4 py-2 font-medium">{typeof m.equipo === 'object' ? m.equipo?.nombre : m.equipo || "N/A"}</td>
                       <td className="px-4 py-2">{m.tipo || "N/A"}</td>
                       <td className="px-4 py-2">{m.frecuencia || "N/A"}</td>
@@ -5076,16 +5036,7 @@ export default function DashboardPage() {
                         </span>
                       </td>
                       <td className="px-4 py-2">
-                        {(() => {
-                          let resultado
-                          if (m.completado) {
-                            resultado = "completado"
-                          } else {
-                            resultado = m.resultado || (isOverdue(m.proxima_programada) ? "vencido" : isUpcoming(m.proxima_programada) ? "próximo" : "pendiente")
-                          }
-                          const displayResultado = resultado.charAt(0).toUpperCase() + resultado.slice(1)
-                          return <Badge className={`${getMaintenanceStatusColor(resultado)}`}>{displayResultado}</Badge>
-                        })()}
+                        <Badge className={`${getMaintenanceStatusColor(m.resultado)}`}>{m.resultado || "N/A"}</Badge>
                       </td>
                       <td className="px-4 py-2 text-sm text-gray-600 max-w-xs truncate" title={m.observaciones}>
                         {m.observaciones || "N/A"}
@@ -5116,23 +5067,6 @@ export default function DashboardPage() {
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>Editar</TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-green-600 hover:text-green-700 bg-transparent"
-                                onClick={() => handleCompleteMaintenance(m)}
-                                disabled={m.completado}
-                              >
-                                {/* CHANGE: Added green checkmark for complete maintenance */}
-                                <CheckCircle2 className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {m.completado ? "Mantenimiento ya completado" : "Completar mantenimiento"}
-                            </TooltipContent>
                           </Tooltip>
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -5240,7 +5174,44 @@ export default function DashboardPage() {
                 <p className="text-red-500 text-xs">{maintenanceFormErrors.frecuencia}</p>
               )}
             </div>
-
+            <div className="md:col-span-2 space-y-2">
+              <Label htmlFor="tecnicoAsignado">Técnico Asignado</Label>
+              <Select
+                value={maintenanceForm.tecnicoAsignadoId?.toString() || ""}
+                onValueChange={(value) => {
+                  const selectedTech = users.find((u) => u.id.toString() === value)
+                  setMaintenanceForm({
+                    ...maintenanceForm,
+                    tecnicoAsignadoId: value ? Number.parseInt(value) : undefined,
+                    tecnicoAsignado: selectedTech?.nombre,
+                  })
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar técnico (opcional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Sin asignar</SelectItem>
+                  {users
+                    .filter((u) => {
+                      const rolLower = u.rol?.toLowerCase() || ""
+                      const rolMatch =
+                        rolLower === "técnico" ||
+                        rolLower === "tecnico" ||
+                        rolLower === "supervisor" ||
+                        rolLower === "administrador"
+                      const estadoMatch = u.estado?.toLowerCase() === "activo"
+                      return rolMatch && estadoMatch
+                    })
+                    .map((tech) => (
+                      <SelectItem key={tech.id} value={tech.id.toString()}>
+                        {tech.nombre} ({tech.rol})
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* </CHANGE> */}
             <div className="space-y-2">
               <Label htmlFor="proximaFecha">Próxima Fecha *</Label>
               <Input
@@ -5257,29 +5228,44 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="ultimaFecha">Última Fecha</Label>
+              <Label htmlFor="ultimaFecha">��ltima Fecha</Label>
               <Input
                 id="ultimaFecha"
                 type="date"
                 value={maintenanceForm.ultimaFecha || ""}
-                onChange={(e) => {
-                  setMaintenanceForm({ ...maintenanceForm, ultimaFecha: e.target.value })
-                  setMaintenanceFormErrors({ ...maintenanceFormErrors, ultimaFecha: "" })
-                }}
-                className={maintenanceFormErrors.ultimaFecha ? "border-red-500" : ""}
+                onChange={(e) => setMaintenanceForm({ ...maintenanceForm, ultimaFecha: e.target.value })}
               />
-              {maintenanceFormErrors.ultimaFecha && (
-                <p className="text-red-500 text-xs">{maintenanceFormErrors.ultimaFecha}</p>
-              )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="observaciones">Observaciones</Label>
-              <Textarea
+              <Label htmlFor="resultado">Resultado</Label>
+              <Select
+                value={maintenanceForm.resultado || ""}
+                onValueChange={(value) => setMaintenanceForm({ ...maintenanceForm, resultado: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar resultado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pendiente">Pendiente</SelectItem>
+                  <SelectItem value="completado">Completado</SelectItem>
+                  <SelectItem value="vencido">Vencido</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="md:col-span-2 space-y-2">
+              <Label htmlFor="observaciones">Observaciones *</Label>
+              <Input
                 id="observaciones"
-                placeholder="Notas sobre el mantenimiento"
                 value={maintenanceForm.observaciones || ""}
-                onChange={(e) => setMaintenanceForm({ ...maintenanceForm, observaciones: e.target.value })}
+                onChange={(e) => {
+                  setMaintenanceForm({ ...maintenanceForm, observaciones: e.target.value })
+                  setMaintenanceFormErrors({ ...maintenanceFormErrors, observaciones: "" })
+                }}
+                placeholder="Detalles adicionales..."
               />
+              {maintenanceFormErrors.observaciones && (
+                <p className="text-red-500 text-xs">{maintenanceFormErrors.observaciones}</p>
+              )}
             </div>
           </div>
           {maintenanceFormErrors.general && <p className="text-red-500 text-xs">{maintenanceFormErrors.general}</p>}
@@ -5337,9 +5323,9 @@ export default function DashboardPage() {
                   <strong>Última Fecha:</strong> {formatDate(selectedMaintenance.ultimaFecha)}
                 </div>
                 <div>
-                  <strong>Estado:</strong>
-                  <Badge className={`ml-2 ${getMaintenanceStatusColor(selectedMaintenance.completado ? "Completado" : isOverdue(selectedMaintenance.proximaFecha) ? "Vencido" : isUpcoming(selectedMaintenance.proximaFecha) ? "Próximo" : "Programado")}`}>
-                    {selectedMaintenance.completado ? "Completado" : isOverdue(selectedMaintenance.proximaFecha) ? "Vencido" : isUpcoming(selectedMaintenance.proximaFecha) ? "Próximo" : "Programado"}
+                  <strong>Resultado:</strong>
+                  <Badge className={`ml-2 ${getMaintenanceStatusColor(selectedMaintenance.resultado)}`}>
+                    {selectedMaintenance.resultado || "N/A"}
                   </Badge>
                 </div>
               </div>
@@ -5465,7 +5451,7 @@ export default function DashboardPage() {
   }
 
   const renderReportes = () => (
-    <div id="reports-section" className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div></div>
       </div>
@@ -5513,7 +5499,7 @@ export default function DashboardPage() {
                   </SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-gray-500">Seleccione el tipo de informaci��n que desea incluir en el reporte</p>
+              <p className="text-xs text-gray-500">Seleccione el tipo de información que desea incluir en el reporte</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -5601,9 +5587,9 @@ export default function DashboardPage() {
     </div>
   )
 
-      // Don't filter again on client - already filtered on server by fetchAuditLogs
-      const totalPagesLogs = Math.ceil(auditLogs.length / logsPerPage)
-      const paginatedLogs = auditLogs.slice((logCurrentPage - 1) * logsPerPage, logCurrentPage * logsPerPage)
+  const filteredLogs = filterLogs(auditLogs, logSearchTerm, logActionFilter)
+  const totalPagesLogs = Math.ceil(filteredLogs.length / logsPerPage)
+  const paginatedLogs = filteredLogs.slice((logCurrentPage - 1) * logsPerPage, logCurrentPage * logsPerPage)
 
   const renderAuditoria = () => (
     <div className="flex flex-col gap-6">
@@ -5654,12 +5640,20 @@ export default function DashboardPage() {
               >
                 <option value="all">Todas las acciones</option>
                 <option value="Crear">Crear</option>
-                <option value="Editar">Editar</option>
+                <option value="Actualizar">Actualizar</option>
                 <option value="Eliminar">Eliminar</option>
+                <option value="Ver">Ver</option>
+                <option value="Descargar">Descargar</option>
+                <option value="Exportar">Exportar</option>
               </select>
             </div>
-            <div className="text-sm text-muted-foreground mt-2">
-              Los filtros se aplican automáticamente
+            <div className="flex justify-end">
+              <button
+                onClick={loadAuditLogs}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Aplicar Filtros
+              </button>
             </div>
           </div>
         </CardContent>
@@ -5670,77 +5664,61 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Logs del Sistema</h3>
             <p className="text-sm text-muted-foreground">
-              {logsLoading ? "Cargando..." : `${auditLogs.length} registro${auditLogs.length !== 1 ? "s" : ""}`}
+              {filteredLogs.length} registro{filteredLogs.length !== 1 ? "s" : ""}
             </p>
           </div>
-          {logsLoading ? (
-            <div className="py-8 text-center">
-              <div className="inline-block">
-                <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-600 rounded-full animate-spin"></div>
-              </div>
-              <p className="text-sm text-gray-500 mt-2">Cargando registros de auditoría...</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-100">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Fecha</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Usuario</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Acción</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Módulo</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Descripción</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white">
+                {paginatedLogs.length > 0 ? (
+                  paginatedLogs.map((log) => (
+                    <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm">{log.created_at ? new Date(log.created_at).toLocaleString('es-ES') : '-'}</td>
+                      <td className="px-4 py-3 text-sm">{log.usuario?.nombre || 'Sistema'}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-medium ${
+                            log.accion === "Crear"
+                              ? "bg-green-100 text-green-800"
+                              : log.accion === "Actualizar"
+                                ? "bg-blue-100 text-blue-800"
+                                : log.accion === "Eliminar"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {log.accion}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">{log.modulo}</td>
+                      <td className="px-4 py-3 text-sm">{log.descripcion}</td>
+                    </tr>
+                  ))
+                ) : (
                   <tr>
-                    <th className="px-4 py-3 text-left font-medium text-gray-700">Fecha</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-700">Usuario</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-700">Acción</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-700">Módulo</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-700">Descripción</th>
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                      No hay registros que coincidan con los filtros aplicados.
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="bg-white">
-                  {paginatedLogs.length > 0 ? (
-                    paginatedLogs.map((log) => (
-                      <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="px-4 py-3 text-sm">{log.created_at ? new Date(log.created_at).toLocaleString('es-ES') : '-'}</td>
-                        <td className="px-4 py-3 text-sm">{log.usuario?.nombre || 'Sistema'}</td>
-                        <td className="px-4 py-3 text-sm">
-                          <span
-                            className={`px-2 py-1 rounded text-xs font-medium ${
-                              log.accion === "Crear"
-                                ? "bg-green-100 text-green-800"
-                                : log.accion === "Editar"
-                                  ? "bg-blue-100 text-blue-800"
-                                  : log.accion === "Eliminar"
-                                    ? "bg-red-100 text-red-800"
-                                    : "bg-gray-100 text-gray-800"
-                            }`}
-                          >
-                            {log.accion}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm">{log.modulo}</td>
-                        <td className="px-4 py-3 text-sm">{log.descripcion}</td>
-                      </tr>
-                    ))
-                  ) : auditLogs.length === 0 && (logSearchTerm !== "" || logActionFilter !== "all") ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                        <p className="font-medium">No se encontraron registros</p>
-                        <p className="text-sm">Intenta cambiar los filtros de búsqueda o selecciona "Todas las acciones"</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                        No hay registros de auditoría
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+                )}
+              </tbody>
+            </table>
+          </div>
 
           {totalPagesLogs > 1 && (
-  <div className="mt-4 flex items-center justify-between">
-  <p className="text-sm text-gray-600">
-  Página {logCurrentPage} de {totalPagesLogs} ({auditLogs.length} registros)
-  </p>
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-sm text-gray-600">
+                Página {logCurrentPage} de {totalPagesLogs} ({filteredLogs.length} registros)
+              </p>
               <div className="flex gap-2">
                 <button
                   onClick={() => setLogCurrentPage(Math.max(1, logCurrentPage - 1))}
@@ -5930,17 +5908,6 @@ export default function DashboardPage() {
 
 
   const handleEditEquipment = (equipo: Equipment) => {
-    // Format dates for input fields (YYYY-MM-DD format)
-    const formatDateForInput = (dateString: any) => {
-      if (!dateString) return ""
-      try {
-        const date = new Date(dateString)
-        return date.toISOString().split('T')[0]
-      } catch {
-        return ""
-      }
-    }
-
     // Set the equipment form with all fields from the selected equipment
     setEquipmentForm({
       id: equipo.id,
@@ -5951,13 +5918,13 @@ export default function DashboardPage() {
       ubicacion: equipo.ubicacion || "",
       estado: equipo.estado || "operativo",
       voltaje: equipo.voltaje || "",
-      fechaInstalacion: formatDateForInput(equipo.fechaInstalacion),
+      fechaInstalacion: equipo.fechaInstalacion || "",
       frecuencia: equipo.frecuencia || "",
-      fechaRetiro: formatDateForInput(equipo.fechaRetiro),
+      fechaRetiro: equipo.fechaRetiro || "",
       codigoInstitucional: equipo.codigoInstitucional || "",
       servicio: equipo.servicio || "",
-      vencimientoGarantia: formatDateForInput(equipo.vencimientoGarantia),
-      fechaIngreso: formatDateForInput(equipo.fechaIngreso),
+      vencimientoGarantia: equipo.vencimientoGarantia || "",
+      fechaIngreso: equipo.fechaIngreso || "",
       procedencia: equipo.procedencia || "",
       potencia: equipo.potencia || "",
       corriente: equipo.corriente || "",
@@ -5983,9 +5950,9 @@ export default function DashboardPage() {
             ...prevForm,
             numeroSerie: transformed.numeroSerie || prevForm.numeroSerie,
             codigoInstitucional: transformed.codigoInstitucional || prevForm.codigoInstitucional,
-            fechaIngreso: formatDateForInput(transformed.fechaIngreso) || prevForm.fechaIngreso,
-            vencimientoGarantia: formatDateForInput(transformed.vencimientoGarantia) || prevForm.vencimientoGarantia,
-            fechaInstalacion: formatDateForInput(transformed.fechaInstalacion) || prevForm.fechaInstalacion,
+            fechaIngreso: transformed.fechaIngreso || prevForm.fechaIngreso,
+            vencimientoGarantia: transformed.vencimientoGarantia || prevForm.vencimientoGarantia,
+            fechaInstalacion: transformed.fechaInstalacion || prevForm.fechaInstalacion,
             otrosEspecificaciones: transformed.otrosEspecificaciones || prevForm.otrosEspecificaciones,
             accesoriosConsumibles: transformed.accesoriosConsumibles || prevForm.accesoriosConsumibles,
             estadoEquipo: transformed.estadoEquipo || prevForm.estadoEquipo,
@@ -6035,25 +6002,27 @@ export default function DashboardPage() {
 
   // The useEffect for loading notifications is now at the top level.
 
-  const handleMarkNotificationAsRead = useCallback(async (id: number) => {
+  const loadNotifications = async () => {
     try {
-      const { markNotificationAsRead } = await import("@/app/actions/notificaciones")
-      await markNotificationAsRead(id, currentUser?.id)
-      await loadNotifications()
+      const notifs = await getNotifications()
+      setNotifications(notifs)
+      setUnreadCount(notifs.filter((n) => !n.leida).length)
     } catch (error) {
-      console.error("[v0] Error marking notification as read:", error)
+      console.error("[v0] Error loading notifications:", error)
+      setNotifications([])
+      setUnreadCount(0)
     }
-  }, [currentUser?.id])
+  }
+
+  const handleMarkNotificationAsRead = useCallback(async (id: number) => {
+    await markAsRead(id)
+    await loadNotifications()
+  }, [])
 
   const handleMarkAllAsRead = useCallback(async () => {
-    try {
-      const { markAllNotificationsAsRead } = await import("@/app/actions/notificaciones")
-      await markAllNotificationsAsRead(currentUser?.id)
-      await loadNotifications()
-    } catch (error) {
-      console.error("[v0] Error marking all notifications as read:", error)
-    }
-  }, [currentUser?.id])
+    await markAllAsRead()
+    await loadNotifications()
+  }, [])
 
   // ADDED: Logo change handler
   const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -6188,21 +6157,13 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen w-full bg-background">
-      {authChecked && (
-        <AppSidebar
-          activeSection={activeSection}
-          onSectionChange={handleSectionChange}
-          userRole={userRole}
-          hospitalLogo={hospitalLogo}
-        />
-      )}
-      {!authChecked ? (
-        <main className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-gray-600">Cargando...</p>
-          </div>
-        </main>
-      ) : (
+      <AppSidebar
+        activeSection={activeSection}
+        onSectionChange={handleSectionChange}
+        userRole={currentUser?.rol || "administrador"}
+        currentUser={currentUser}
+        hospitalLogo={hospitalLogo}
+      />
       <main className="flex-1 w-full">
         <AppHeader
           currentUser={currentUser}
@@ -6215,7 +6176,6 @@ export default function DashboardPage() {
         />
         <div className="p-6">{renderContent()}</div>
       </main>
-      )}
 
       {/* EQUIPMENT DELETE CONFIRMATION DIALOG */}
       <Dialog open={isDeleteEquipmentDialogOpen} onOpenChange={setIsDeleteEquipmentDialogOpen}>
@@ -6249,7 +6209,7 @@ export default function DashboardPage() {
           <DialogHeader>
             <DialogTitle>Confirmar Eliminación</DialogTitle>
             <DialogDescription>
-              ¿Est�� seguro de que desea eliminar este usuario? Esta acción no se puede deshacer.
+              ¿Está seguro de que desea eliminar este usuario? Esta acción no se puede deshacer.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -6265,16 +6225,9 @@ export default function DashboardPage() {
             <Button
               variant="destructive"
               onClick={async () => {
-                if (!selectedUserToDelete) {
-                  console.log("[v0] Delete user: No user selected")
-                  return
-                }
+                if (!selectedUserToDelete) return
 
-                console.log("[v0] Delete user: Starting deletion for id:", selectedUserToDelete)
-                console.log("[v0] Delete user: Current user id:", currentUser?.id)
-                const result = await removeUsuario(selectedUserToDelete, currentUser?.id)
-                console.log("[v0] Delete user: Result:", result)
-                
+                const result = await removeUsuario(selectedUserToDelete)
                 if (result.success) {
                   toast({
                     title: "Usuario eliminado",
@@ -6284,7 +6237,6 @@ export default function DashboardPage() {
                   setSelectedUserToDelete(null)
                   await loadUsers()
                 } else {
-                  console.log("[v0] Delete user: Error -", result.error)
                   toast({
                     variant: "destructive",
                     title: "Error al eliminar",

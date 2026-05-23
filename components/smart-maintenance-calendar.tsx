@@ -10,7 +10,7 @@ export interface SmartCalendarMaintenance {
   equipo?: string
   tipo: string
   frecuencia: string
-  proximaFecha: string | Date
+  proximaFecha: string
   status?: 'overdue' | 'upcoming' | 'scheduled' | 'completed'
 }
 
@@ -33,15 +33,6 @@ export function SmartMaintenanceCalendar({
 }: SmartMaintenanceCalendarProps) {
   const [hoveredDate, setHoveredDate] = React.useState<Date | null>(null)
 
-  // Helper function to safely convert date to string
-  const getDateString = (date: string | Date | undefined | null): string => {
-    if (!date) return ""
-    if (typeof date === 'string') {
-      return date.split('T')[0]
-    }
-    return new Date(date).toISOString().split('T')[0]
-  }
-
   // Calcular sugerencias inteligentes
   const smartSuggestions = useMemo(() => {
     const suggestions: Record<string, any> = {}
@@ -49,8 +40,7 @@ export function SmartMaintenanceCalendar({
 
     // Mapear últimas fechas de mantenimiento por equipo
     maintenances.forEach((m) => {
-      const dateStr = getDateString(m.proximaFecha)
-      const date = new Date(dateStr)
+      const date = new Date(m.proximaFecha)
       const equipoId = m.equipoId
       
       if (!equipoUltimaFecha[equipoId] || date > equipoUltimaFecha[equipoId]) {
@@ -65,7 +55,7 @@ export function SmartMaintenanceCalendar({
       const dateStr = date.toISOString().split('T')[0]
       
       const dayMaintenances = maintenances.filter(
-        (m) => m.proximaFecha && getDateString(m.proximaFecha) === dateStr
+        (m) => m.proximaFecha.split('T')[0] === dateStr
       )
 
       // Contar conflictos (múltiples en el mismo equipo)
@@ -229,11 +219,11 @@ export function SmartMaintenanceCalendar({
           {Array.from({ length: days }).map((_, i) => {
             const day = i + 1
             const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day)
-            const dateStr = getDateString(date)
+            const dateStr = date.toISOString().split('T')[0]
             const status = getDateStatus(date)
             const suggestion = smartSuggestions[dateStr]
             const dayMaintenances = maintenances.filter(
-              (m) => m.proximaFecha && getDateString(m.proximaFecha) === dateStr
+              (m) => m.proximaFecha.split('T')[0] === dateStr
             )
 
             let bgColor = 'bg-white'
@@ -298,8 +288,8 @@ export function SmartMaintenanceCalendar({
             {hoveredDate.toLocaleDateString('es-ES', { weekday: 'long', month: 'long', day: 'numeric' })}
           </p>
           {(() => {
-            const dateStr = getDateString(hoveredDate)
-            const dayMaintenances = maintenances.filter((m) => m.proximaFecha && getDateString(m.proximaFecha) === dateStr)
+            const dateStr = hoveredDate.toISOString().split('T')[0]
+            const dayMaintenances = maintenances.filter((m) => m.proximaFecha.split('T')[0] === dateStr)
             const suggestion = smartSuggestions[dateStr]
 
             if (dayMaintenances.length === 0) {

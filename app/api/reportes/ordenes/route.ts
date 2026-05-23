@@ -6,7 +6,7 @@ import { startOfMonth, endOfMonth, subMonths } from 'date-fns'
 // GET - Reporte de órdenes de trabajo
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireAuth()
+    await requireAuth()
     
     const { searchParams } = new URL(request.url)
     const meses = parseInt(searchParams.get('meses') || '3')
@@ -119,26 +119,6 @@ export async function GET(request: NextRequest) {
         tiempo_promedio_horas: Math.round(tiempoPromedio * 10) / 10,
       },
       ordenes_pendientes_por_tecnico: ordenesPorTecnicoConNombres,
-    }
-    
-    // Create audit log for report generation
-    try {
-      await prisma.log.create({
-        data: {
-          usuario_id: session.id,
-          accion: 'Exportar',
-          modulo: 'Reportes',
-          descripcion: `Reporte de órdenes de trabajo generado (${meses} meses)`,
-          datos: { 
-            periodo_meses: meses,
-            fecha_inicio: fechaInicio.toISOString(),
-            fecha_fin: fechaFin.toISOString(),
-            total_ordenes: ordenesPorEstado.reduce((sum, item) => sum + item._count, 0)
-          },
-        },
-      })
-    } catch (logError) {
-      console.error("[v0] Error creating audit log:", logError)
     }
     
     return NextResponse.json(reporte)

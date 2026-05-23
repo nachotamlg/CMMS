@@ -1,6 +1,6 @@
 import { apiClient } from "./client"
 
-// All requests go through apiClient which uses Next.js API routes
+// Now all requests go through apiClient which already has the correct base URL
 
 export interface Documento {
   id: number
@@ -33,55 +33,42 @@ export async function uploadDocumento(
   equipoId: number,
   file: File,
   subidoPorId: number,
-  token?: string,
+  token: string,
 ): Promise<Documento> {
-  console.log('[v0] uploadDocumento - starting upload for equipment:', equipoId)
-  
-  const uploadUrl = `/api/equipos/${equipoId}/documentos`
-  console.log('[v0] uploadDocumento - uploading to:', uploadUrl)
+  if (!token) {
+    throw new Error("No authentication token found. Please log in again.")
+  }
+
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
+  const uploadUrl = `${API_BASE_URL}/equipos/${equipoId}/documentos`
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    Authorization: `Bearer ${token}`,
+  }
 
   const formData = new FormData()
   formData.append("archivo", file)
   formData.append("subido_por_id", subidoPorId.toString())
 
-  console.log('[v0] uploadDocumento - making request with formData')
-  const headers: HeadersInit = {}
-  
-  // Add Bearer token if provided
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-    console.log('[v0] uploadDocumento - added Bearer token')
-  }
-
-  // Fetch with credentials: cookies will be sent automatically
   const response = await fetch(uploadUrl, {
     method: "POST",
-    credentials: "include",
     headers,
     body: formData,
   })
 
-  console.log('[v0] uploadDocumento - response status:', response.status)
-  
   if (!response.ok) {
     const errorText = await response.text()
-    console.log('[v0] uploadDocumento - error response:', errorText)
-    try {
-      const errorData = JSON.parse(errorText)
-      throw new Error(errorData.error || `Failed to upload document: ${response.statusText}`)
-    } catch (e) {
-      throw new Error(`Failed to upload document: ${response.statusText}`)
-    }
+    throw new Error(`Failed to upload document: ${response.statusText}`)
   }
 
   const result = await response.json()
-  const documento = result.data || result
-  console.log('[v0] uploadDocumento - document created successfully:', documento.id)
-  return documento
+  return result.data
 }
 
 export async function downloadDocumento(documentoId: number): Promise<Blob> {
   const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
 
   const headers: Record<string, string> = {
     Accept: "application/octet-stream",
@@ -91,7 +78,7 @@ export async function downloadDocumento(documentoId: number): Promise<Blob> {
     headers["Authorization"] = `Bearer ${token}`
   }
 
-  const response = await fetch(`/api/documentos/${documentoId}/download`, {
+  const response = await fetch(`${API_BASE_URL}/documentos/${documentoId}/download`, {
     method: "GET",
     headers,
   })
@@ -108,9 +95,11 @@ export async function deleteDocumento(documentoId: number): Promise<void> {
 }
 
 export function getDocumentoUrl(urlArchivo: string): string {
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
+
   if (urlArchivo.startsWith("http")) {
     return urlArchivo
   }
-  // Use Next.js storage endpoint
-  return `/api/storage/${urlArchivo}`
+  const baseUrlWithoutApi = API_BASE_URL.replace("/api", "")
+  return `${baseUrlWithoutApi}/storage/${urlArchivo}`
 }
