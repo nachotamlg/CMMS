@@ -110,6 +110,14 @@ export async function getOrdenesDB(filters?: any): Promise<any> {
       where.equipo_id = filters.equipo_id
     }
 
+    // Add search filter for order number and equipment name
+    if (filters?.search) {
+      where.OR = [
+        { numero_orden: { contains: filters.search, mode: 'insensitive' } },
+        { equipo: { nombre: { contains: filters.search, mode: 'insensitive' } } },
+      ]
+    }
+
     const perPage = filters?.perPage || 10
     const page = filters?.page || 1
     const skip = (page - 1) * perPage
