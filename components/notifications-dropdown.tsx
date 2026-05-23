@@ -1,18 +1,58 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Bell, AlertCircle, CheckCircle2, Info, Trash2, X } from 'lucide-react'
+import { Bell, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
-import { getNotifications, type Notification, markAsRead, deleteNotification } from "@/lib/api/notifications"
-import Link from "next/link"
+import { getNotifications, type Notification } from "@/app/actions/notificaciones"
+
+function getNotificationIcon(tipo?: string) {
+  switch (tipo?.toLowerCase()) {
+    case "warning":
+      return <AlertCircle className="h-5 w-5 text-amber-500 flex-shrink-0" />
+    case "error":
+      return <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+    case "success":
+      return <CheckCircle2 className="h-5 w-5 text-emerald-500 flex-shrink-0" />
+    default:
+      return <Clock className="h-5 w-5 text-blue-500 flex-shrink-0" />
+  }
+}
+
+function getNotificationColor(tipo?: string) {
+  switch (tipo?.toLowerCase()) {
+    case "warning":
+      return "bg-amber-50 dark:bg-amber-950"
+    case "error":
+      return "bg-red-50 dark:bg-red-950"
+    case "success":
+      return "bg-emerald-50 dark:bg-emerald-950"
+    default:
+      return "hover:bg-muted/50"
+  }
+}
+
+function formatTime(dateString: string): string {
+  const date = new Date(dateString)
+  const now = new Date()
+  const diff = now.getTime() - date.getTime()
+  const hours = Math.floor(diff / (1000 * 60 * 60))
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+
+  if (hours < 1) return "Hace unos minutos"
+  if (hours === 1) return "Hace 1 hora"
+  if (hours < 24) return `Hace ${hours} horas`
+  if (days === 1) return "Hace 1 día"
+  return `Hace ${days} días`
+}
 
 export function NotificationsDropdown() {
   const [notifications, setNotifications] = useState<Notification[]>([])
@@ -23,9 +63,12 @@ export function NotificationsDropdown() {
       try {
         setLoading(true)
         const data = await getNotifications()
-        setNotifications(data)
+        console.log("[v0] Loaded notifications:", data)
+        // Ensure data is always an array
+        setNotifications(Array.isArray(data) ? data : [])
       } catch (error) {
         console.error("[v0] Failed to load notifications:", error)
+        setNotifications([])
       } finally {
         setLoading(false)
       }
@@ -38,173 +81,52 @@ export function NotificationsDropdown() {
 
   const unreadCount = notifications.filter((n) => !n.leida).length
 
-  const handleMarkAsRead = async (id: number) => {
-    try {
-      await markAsRead(id)
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, leida: true } : n))
-      )
-    } catch (error) {
-      console.error("[v0] Error marking as read:", error)
-    }
-  }
-
-  const handleDelete = async (id: number) => {
-    try {
-      await deleteNotification(id)
-      setNotifications((prev) => prev.filter((n) => n.id !== id))
-    } catch (error) {
-      console.error("[v0] Error deleting notification:", error)
-    }
-  }
-
-  const getNotificationIcon = (type: string) => {
-    const iconClass = "h-5 w-5"
-    switch (type) {
-      case "error":
-        return <AlertCircle className={`${iconClass} text-red-500`} />
-      case "warning":
-        return <AlertCircle className={`${iconClass} text-yellow-500`} />
-      case "success":
-        return <CheckCircle2 className={`${iconClass} text-green-500`} />
-      case "info":
-      default:
-        return <Info className={`${iconClass} text-blue-500`} />
-    }
-  }
-
-  const getNotificationBgColor = (type: string) => {
-    switch (type) {
-      case "error":
-        return "bg-red-50 border-red-200 hover:bg-red-100"
-      case "warning":
-        return "bg-yellow-50 border-yellow-200 hover:bg-yellow-100"
-      case "success":
-        return "bg-green-50 border-green-200 hover:bg-green-100"
-      case "info":
-      default:
-        return "bg-blue-50 border-blue-200 hover:bg-blue-100"
-    }
-  }
-
-  const visibleNotifications = notifications.slice(0, 5)
-
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative hover:bg-accent">
+        <Button variant="ghost" size="icon" className="relative">
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <Badge
               variant="destructive"
-              className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs font-bold"
+              className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-xs"
             >
-              {unreadCount > 9 ? "9+" : unreadCount}
+              {unreadCount}
             </Badge>
           )}
-          <span className="sr-only">
-            {unreadCount} notificaciones sin leer
-          </span>
+          <span className="sr-only">Notificaciones</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-96">
-        <div className="flex items-center justify-between px-4 py-3">
-          <h2 className="font-semibold text-foreground">Notificaciones</h2>
-          {unreadCount > 0 && (
-            <Badge variant="secondary" className="text-xs">
-              {unreadCount} nuevas
-            </Badge>
-          )}
-        </div>
-        <DropdownMenuSeparator className="m-0" />
-        
-        <div className="max-h-96 overflow-y-auto">
-          {loading ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              Cargando notificaciones...
-            </div>
-          ) : visibleNotifications.length === 0 ? (
-            <div className="py-8 text-center">
-              <Bell className="h-8 w-8 text-muted-foreground mx-auto mb-2 opacity-50" />
-              <p className="text-sm text-muted-foreground">
-                No tienes notificaciones
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-1 p-2">
-              {visibleNotifications.map((notification) => (
-                <div
-                  key={notification.id}
-                  className={`group flex gap-3 rounded-lg border p-3 transition-all ${
-                    !notification.leida ? "border-primary bg-primary/5" : getNotificationBgColor(notification.tipo)
-                  }`}
-                >
-                  <div className="flex-shrink-0 mt-0.5">
-                    {getNotificationIcon(notification.tipo)}
+      <DropdownMenuContent align="end" className="w-80">
+        <DropdownMenuLabel>Notificaciones</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {loading ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">Cargando...</div>
+        ) : notifications.length === 0 ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">No hay notificaciones</div>
+        ) : (
+          notifications.slice(0, 5).map((notification) => (
+            <DropdownMenuItem key={notification.id} className={`flex flex-col items-start p-3 cursor-pointer ${getNotificationColor(notification.tipo)}`}>
+              <div className="flex items-start gap-3 w-full">
+                {getNotificationIcon(notification.tipo)}
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium leading-none">{notification.titulo}</p>
+                    {!notification.leida && <div className="h-2 w-2 rounded-full bg-primary flex-shrink-0" />}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="font-medium text-sm leading-snug text-foreground">
-                        {notification.titulo}
-                      </p>
-                      {!notification.leida && (
-                        <div className="flex-shrink-0 h-2 w-2 rounded-full bg-primary mt-1.5" />
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-snug mt-1">
-                      {notification.mensaje}
-                    </p>
-                    <p className="text-xs text-muted-foreground/70 mt-2">
-                      {new Date(notification.fecha).toLocaleDateString("es-ES", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                    {!notification.leida && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0"
-                        onClick={() => handleMarkAsRead(notification.id)}
-                        title="Marcar como leída"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                        <span className="sr-only">Marcar como leída</span>
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                      onClick={() => handleDelete(notification.id)}
-                      title="Eliminar"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span className="sr-only">Eliminar notificación</span>
-                    </Button>
-                  </div>
+                  <p className="text-sm text-muted-foreground">{notification.mensaje}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatTime(notification.fecha)}
+                  </p>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <DropdownMenuSeparator className="m-0" />
-        <div className="p-2">
-          <Link href="/notificaciones" className="w-full">
-            <Button
-              variant="ghost"
-              className="w-full justify-center text-primary font-medium text-sm hover:bg-primary/5"
-            >
-              Ver todas las notificaciones
-            </Button>
-          </Link>
-        </div>
+              </div>
+            </DropdownMenuItem>
+          ))
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="justify-center text-center cursor-pointer">
+          Ver todas las notificaciones
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

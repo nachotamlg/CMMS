@@ -1,8 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Optimizaciones para producción
-  swcMinify: true,
-
   // Configuración de imágenes
   images: {
     unoptimized: true,
@@ -52,7 +49,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https: blob:",
               "font-src 'self' data:",
-              "connect-src 'self' https://va.vercel-scripts.com https://*.vercel-analytics.com http://localhost:8000 blob:",
+              "connect-src 'self' https://va.vercel-scripts.com https://*.vercel-analytics.com blob:",
               "object-src 'none'",
               "base-uri 'self'",
               "form-action 'self'",

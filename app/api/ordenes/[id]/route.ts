@@ -12,7 +12,7 @@ export async function GET(
     await requireAuth()
     const { id } = await params
     
-    const orden = await prisma.ordenTrabajo.findUnique({
+    const orden = await prisma.orden_trabajo.findUnique({
       where: { id: parseInt(id) },
       include: {
         equipo: true,
@@ -35,7 +35,7 @@ export async function GET(
         documentos: {
           orderBy: { created_at: 'desc' },
           include: {
-            usuario: {
+            subidoPor: {
               select: {
                 id: true,
                 nombre: true,
@@ -65,17 +65,15 @@ export async function GET(
 
 // PUT - Actualizar orden
 const updateOrdenSchema = z.object({
-  estado: z.string().optional(),
+  equipo_id: z.number().optional().or(z.string().transform(Number).optional()),
+  tipo: z.string().optional(),
   prioridad: z.string().optional(),
   descripcion: z.string().optional(),
-  fecha_programada: z.string().optional(),
-  fecha_inicio: z.string().optional(),
-  fecha_finalizacion: z.string().optional(),
-  tiempo_real: z.number().optional(),
-  costo_real: z.number().optional(),
+  estado: z.string().optional(),
+  fecha_programada: z.string().optional().or(z.null()),
+  tiempo_estimado: z.number().optional().or(z.null()),
+  costo_estimado: z.number().optional().or(z.null()),
   asignado_a: z.number().nullable().optional(),
-  notas: z.string().optional(),
-  resultado: z.string().optional(),
 })
 
 export async function PUT(
@@ -87,18 +85,34 @@ export async function PUT(
     const { id } = await params
     const body = await request.json()
     
+    console.log('[v0] PUT /ordenes/[id] - Received body:', JSON.stringify(body, null, 2))
+    
     const validation = updateOrdenSchema.safeParse(body)
     if (!validation.success) {
+      const errors = validation.error.errors.map(e => ({
+        path: e.path.join('.'),
+        message: e.message,
+        code: e.code
+      }))
+      console.error('[v0] PUT /ordenes/[id] - Validation errors:', errors)
       return NextResponse.json(
-        { error: validation.error.errors[0].message },
+        { error: 'Datos inválidos', details: errors },
         { status: 400 }
       )
     }
     
     const data = validation.data
+    const ordenId = parseInt(id)
+
+    if (isNaN(ordenId)) {
+      return NextResponse.json(
+        { error: 'ID de orden inválido' },
+        { status: 400 }
+      )
+    }
     
-    const ordenExistente = await prisma.ordenTrabajo.findUnique({
-      where: { id: parseInt(id) },
+    const ordenExistente = await prisma.orden_trabajo.findUnique({
+      where: { id: ordenId },
       include: {
         tecnico: true,
       },
@@ -111,20 +125,23 @@ export async function PUT(
       )
     }
     
-    const orden = await prisma.ordenTrabajo.update({
-      where: { id: parseInt(id) },
-      data: {
-        ...data,
-        fecha_programada: data.fecha_programada 
-          ? new Date(data.fecha_programada) 
-          : undefined,
-        fecha_inicio: data.fecha_inicio 
-          ? new Date(data.fecha_inicio) 
-          : undefined,
-        fecha_finalizacion: data.fecha_finalizacion 
-          ? new Date(data.fecha_finalizacion) 
-          : undefined,
-      },
+    // Build update object, only including provided fields
+    const updateData: any = {}
+    if (data.equipo_id !== undefined) updateData.equipo_id = data.equipo_id
+    if (data.tipo !== undefined) updateData.tipo = data.tipo
+    if (data.prioridad !== undefined) updateData.prioridad = data.prioridad
+    if (data.descripcion !== undefined) updateData.descripcion = data.descripcion
+    if (data.estado !== undefined) updateData.estado = data.estado
+    if (data.fecha_programada !== undefined) {
+      updateData.fecha_programada = data.fecha_programada ? new Date(data.fecha_programada) : null
+    }
+    if (data.tiempo_estimado !== undefined) updateData.tiempo_estimado = data.tiempo_estimado
+    if (data.costo_estimado !== undefined) updateData.costo_estimado = data.costo_estimado
+    if (data.asignado_a !== undefined) updateData.asignado_a = data.asignado_a
+    
+    const orden = await prisma.orden_trabajo.update({
+      where: { id: ordenId },
+      data: updateData,
       include: {
         equipo: true,
         creador: {
@@ -148,8 +165,8 @@ export async function PUT(
     await prisma.log.create({
       data: {
         usuario_id: session.id,
-        accion: 'actualizar',
-        modulo: 'ordenes',
+        accion: 'Editar',
+        modulo: 'Órdenes de Trabajo',
         descripcion: `Orden actualizada: ${orden.numero_orden}`,
         datos: { orden_id: orden.id, cambios: data },
       },
@@ -159,37 +176,53 @@ export async function PUT(
     if (data.asignado_a !== undefined && 
         data.asignado_a !== ordenExistente.asignado_a) {
       if (data.asignado_a) {
-        await prisma.notificacion.create({
-          data: {
-            usuario_id: data.asignado_a,
-            tipo: 'orden_asignada',
-            titulo: 'Orden asignada',
-            mensaje: `Se te ha asignado la orden ${orden.numero_orden}`,
-            datos: { orden_id: orden.id },
-          },
-        })
+        try {
+          await prisma.notificacion.create({
+            data: {
+              usuario_id: data.asignado_a,
+              tipo: 'orden_asignada',
+              titulo: 'Orden asignada',
+              mensaje: `Se te ha asignado la orden ${orden.numero_orden}`,
+              datos: { orden_id: orden.id },
+            },
+          })
+          console.log('[v0] Notification created for new technician assignment:', data.asignado_a)
+        } catch (notificationError) {
+          console.error('[v0] Error creating notification for technician assignment:', notificationError)
+        }
       }
     }
     
     // Notificar si cambió el estado
     if (data.estado && data.estado !== ordenExistente.estado) {
-      await prisma.notificacion.create({
-        data: {
-          usuario_id: ordenExistente.creado_por,
-          tipo: 'orden_actualizada',
-          titulo: 'Estado de orden actualizado',
-          mensaje: `La orden ${orden.numero_orden} cambió a ${data.estado}`,
-          datos: { orden_id: orden.id },
-        },
-      })
+      try {
+        await prisma.notificacion.create({
+          data: {
+            usuario_id: ordenExistente.creado_por,
+            tipo: 'orden_actualizada',
+            titulo: 'Estado de orden actualizado',
+            mensaje: `La orden ${orden.numero_orden} cambió a ${data.estado}`,
+            datos: { orden_id: orden.id },
+          },
+        })
+        console.log('[v0] Notification created for status change:', data.estado)
+      } catch (notificationError) {
+        console.error('[v0] Error creating notification for status change:', notificationError)
+      }
     }
     
     return NextResponse.json(orden)
   } catch (error: any) {
     console.error('[v0] Error updating orden:', error)
+    if (error.code === 'P2025') {
+      return NextResponse.json(
+        { error: 'Orden no encontrada' },
+        { status: 404 }
+      )
+    }
     return NextResponse.json(
-      { error: error.message || 'Error al actualizar orden' },
-      { status: error.message === 'No autorizado' ? 401 : 500 }
+      { error: error.message || 'Error al actualizar la orden' },
+      { status: 500 }
     )
   }
 }
@@ -202,9 +235,17 @@ export async function DELETE(
   try {
     const session = await requireAuth()
     const { id } = await params
+    const ordenId = parseInt(id)
+
+    if (isNaN(ordenId)) {
+      return NextResponse.json(
+        { error: 'ID de orden inválido' },
+        { status: 400 }
+      )
+    }
     
-    const orden = await prisma.ordenTrabajo.findUnique({
-      where: { id: parseInt(id) },
+    const orden = await prisma.orden_trabajo.findUnique({
+      where: { id: ordenId },
     })
     
     if (!orden) {
@@ -214,27 +255,29 @@ export async function DELETE(
       )
     }
     
-    await prisma.ordenTrabajo.delete({
-      where: { id: parseInt(id) },
+    // Soft delete - cambiar estado a "cancelada"
+    const updatedOrden = await prisma.orden_trabajo.update({
+      where: { id: ordenId },
+      data: { estado: 'cancelada', deleted_at: new Date() },
     })
     
     // Crear log
     await prisma.log.create({
       data: {
         usuario_id: session.id,
-        accion: 'eliminar',
-        modulo: 'ordenes',
+        accion: 'Eliminar',
+        modulo: 'Órdenes de Trabajo',
         descripcion: `Orden eliminada: ${orden.numero_orden}`,
-        datos: { orden_id: orden.id },
+        datos: { orden_id: ordenId },
       },
     })
     
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, message: 'Orden eliminada correctamente' })
   } catch (error: any) {
     console.error('[v0] Error deleting orden:', error)
     return NextResponse.json(
-      { error: error.message || 'Error al eliminar orden' },
-      { status: error.message === 'No autorizado' ? 401 : 500 }
+      { error: error.message || 'Error al eliminar la orden' },
+      { status: 500 }
     )
   }
 }
