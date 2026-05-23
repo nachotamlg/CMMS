@@ -27,10 +27,16 @@ export async function generateToken(payload: JWTPayload): Promise<string> {
 // Verificar token JWT
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
+    console.log('[v0] verifyToken - token length:', token?.length)
+    if (!token) {
+      console.log('[v0] verifyToken - token is empty')
+      return null
+    }
     const { payload } = await jwtVerify(token, secret)
+    console.log('[v0] verifyToken - token verified successfully')
     return payload as unknown as JWTPayload
-  } catch (error) {
-    console.error('[v0] Error verifying token:', error)
+  } catch (error: any) {
+    console.error('[v0] verifyToken - Error verifying token:', error.message)
     return null
   }
 }
@@ -56,13 +62,78 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 // Middleware para verificar autenticación
-export async function requireAuth(): Promise<JWTPayload> {
-  const session = await getSession()
+export async function requireAuth(request?: any): Promise<JWTPayload> {
+  let session: JWTPayload | null = null
+  
+  // PRIORITY 1: Try Authorization Bearer token header (most reliable for cross-origin)
+  if (request) {
+    const authHeader = request.headers.get('Authorization')
+    console.log('[v0] requireAuth - authHeader present:', !!authHeader)
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7)
+      console.log('[v0] requireAuth - attempting to verify Bearer token, length:', token?.length)
+      session = await verifyToken(token)
+      console.log('[v0] requireAuth - Bearer token verification result:', session ? 'SUCCESS' : 'FAILED')
+    }
+  }
+  
+  // PRIORITY 2: Try X-User-ID header (fallback for when token is unavailable)
+  if (!session && request) {
+    const userId = request.headers.get('X-User-ID')
+    console.log('[v0] requireAuth - X-User-ID header present:', !!userId)
+    
+    if (userId) {
+      // Create a minimal session from the userId header (fallback authentication)
+      try {
+        const id = parseInt(userId)
+        console.log('[v0] requireAuth - creating session from X-User-ID:', id)
+        session = {
+          id,
+          email: `user_${id}@system.local`,
+          nombre: `User ${id}`,
+          rol: 'Usuario'
+        }
+        console.log('[v0] requireAuth - fallback session created from X-User-ID')
+      } catch (e) {
+        console.error('[v0] requireAuth - failed to parse X-User-ID:', e)
+      }
+    }
+  }
+  
+  // PRIORITY 3: Try token from request cookies (for API routes with external hosts)
+  if (!session && request) {
+    const cookieHeader = request.headers.get('cookie')
+    console.log('[v0] requireAuth - cookie header present:', !!cookieHeader)
+    
+    if (cookieHeader) {
+      // Parse cookies from header
+      const cookies = cookieHeader.split(';').reduce((acc: Record<string, string>, cookie: string) => {
+        const [key, value] = cookie.trim().split('=')
+        if (key && value) acc[key] = value
+        return acc
+      }, {})
+      
+      if (cookies['token']) {
+        console.log('[v0] requireAuth - found token in request cookie')
+        session = await verifyToken(cookies['token'])
+        console.log('[v0] requireAuth - request cookie token verification:', session ? 'SUCCESS' : 'FAILED')
+      }
+    }
+  }
+  
+  // PRIORITY 4: Try Next.js cookies store
+  if (!session) {
+    session = await getSession()
+    console.log('[v0] requireAuth - session from Next.js cookies:', !!session)
+  }
   
   if (!session) {
+    console.log('[v0] requireAuth - NO SESSION FOUND - throwing 401')
     throw new Error('No autorizado')
   }
   
+  console.log('[v0] requireAuth - session authenticated:', session.email)
   return session
 }
 

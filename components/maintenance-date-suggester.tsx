@@ -16,6 +16,25 @@ interface MaintenanceDateSuggesterProps {
   currentDate?: string
   onDateSelect: (date: string) => void
   loading?: boolean
+  frecuencia?: string // 'diaria', 'semanal', 'mensual', etc.
+  ultimaRealizacion?: string // última fecha de realización
+}
+
+// Helper function to convert frecuencia text to days
+function frecuenciaToDias(frecuencia?: string): number {
+  if (!frecuencia) return 30 // default
+  
+  const frecuenciaMap: Record<string, number> = {
+    'diaria': 1,
+    'semanal': 7,
+    'quincenal': 15,
+    'mensual': 30,
+    'bimensual': 60,
+    'trimestral': 90,
+    'semestral': 180,
+    'anual': 365,
+  }
+  return frecuenciaMap[frecuencia?.toLowerCase()] || 30
 }
 
 export function MaintenanceDateSuggester({
@@ -23,26 +42,58 @@ export function MaintenanceDateSuggester({
   currentDate,
   onDateSelect,
   loading = false,
+  frecuencia,
+  ultimaRealizacion,
 }: MaintenanceDateSuggesterProps) {
   const [suggestions, setSuggestions] = useState<DateSuggestion[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   useEffect(() => {
-    // Simular carga de sugerencias
-    // En una implementación real, esto llamaría a una API
     const loadSuggestions = async () => {
       setIsLoading(true)
       try {
-        // Placeholder - en producción llamar a API
         const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        
+        const frecuenciaDias = frecuenciaToDias(frecuencia)
         const mockSuggestions: DateSuggestion[] = []
 
-        for (let i = 1; i <= 5; i++) {
-          const date = new Date(today.getTime() + i * 7 * 24 * 60 * 60 * 1000)
+        // Calculate base date based on last maintenance
+        let baseDate = new Date(today)
+        if (ultimaRealizacion) {
+          const lastDate = new Date(ultimaRealizacion)
+          lastDate.setHours(0, 0, 0, 0)
+          baseDate = new Date(lastDate.getTime() + frecuenciaDias * 24 * 60 * 60 * 1000)
+        } else {
+          // If no last maintenance, suggest starting from today
+          baseDate = new Date(today.getTime() + frecuenciaDias * 24 * 60 * 60 * 1000)
+        }
+
+        // Generate 5 suggestions based on frequency
+        for (let i = 0; i < 5; i++) {
+          const suggestedDate = new Date(baseDate.getTime() + i * frecuenciaDias * 24 * 60 * 60 * 1000)
+          
+          // Calculate score based on how well it matches the frequency pattern
+          let score = 100
+          
+          // Penalize if date is in the past
+          if (suggestedDate < today) {
+            score -= 30
+          }
+          
+          // The first suggestion gets the highest score
+          if (i === 0) {
+            score = Math.max(score, 95)
+          } else {
+            score = Math.max(score, 85 - i * 5)
+          }
+
           mockSuggestions.push({
-            date,
-            score: Math.max(50, 100 - i * 10),
-            reason: i === 1 ? 'Próxima semana disponible' : `Opción ${i}`,
+            date: suggestedDate,
+            score,
+            reason: i === 0 
+              ? `Recomendado por frecuencia (${frecuencia || 'mensual'})` 
+              : `+${frecuenciaDias * i} días desde recomendado`,
           })
         }
 
@@ -55,7 +106,7 @@ export function MaintenanceDateSuggester({
     if (equipoId) {
       loadSuggestions()
     }
-  }, [equipoId])
+  }, [equipoId, frecuencia, ultimaRealizacion])
 
   const handleSelectDate = (date: Date) => {
     const dateStr = date.toISOString().split('T')[0]

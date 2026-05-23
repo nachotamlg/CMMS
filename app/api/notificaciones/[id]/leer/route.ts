@@ -44,3 +44,12 @@ export async function PUT(
     )
   }
 }
+
+// PATCH - Alternativa para marcar como leída
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  return PUT(request, { params })
+}
+

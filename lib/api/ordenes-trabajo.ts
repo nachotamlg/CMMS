@@ -28,7 +28,6 @@ export interface OrdenTrabajo {
   horasTrabajadas?: number
   costoRepuestos?: number
   costoTotal?: number
-  observaciones?: string
   createdAt?: string
   updatedAt?: string
 }
@@ -109,8 +108,14 @@ function transformOrdenToAPI(orden: Partial<OrdenTrabajo>): any {
     asignado_a: orden.tecnicoAsignadoId || undefined,
     // Optional fields - map fechaCreacion to fecha_programada
     ...(orden.fechaCreacion && { fecha_programada: orden.fechaCreacion }),
+    // Include fecha_inicio only if it's not undefined or null (allow empty string)
+    ...(orden.fechaInicio !== undefined && orden.fechaInicio !== null ? { fecha_inicio: orden.fechaInicio || null } : {}),
+    // Include fecha_finalizacion only if it's not undefined or null (allow empty string)
+    ...(orden.fechaFinalizacion !== undefined && orden.fechaFinalizacion !== null ? { fecha_finalizacion: orden.fechaFinalizacion || null } : {}),
     ...(orden.horasTrabajadas !== undefined && orden.horasTrabajadas !== null && { tiempo_estimado: orden.horasTrabajadas }),
     ...(orden.costoRepuestos !== undefined && orden.costoRepuestos !== null && { costo_estimado: orden.costoRepuestos }),
+    // Include costo_real only if it's not undefined or null (allow empty string)
+    ...(orden.costoTotal !== undefined && orden.costoTotal !== null ? { costo_real: orden.costoTotal || null } : {}),
     // For updates only, include estado
     ...(orden.id && { estado: estado }),
   }
@@ -130,9 +135,30 @@ function transformOrdenToAPI(orden: Partial<OrdenTrabajo>): any {
 const isServer = typeof window === "undefined"
 
 export async function getOrdenesTrabajo(filters?: OrdenesTrabajoFilters): Promise<OrdenesTrabajoResponse> {
-  const client = isServer ? serverApiClient : apiClient
-
   console.log("[v0] getOrdenesTrabajo - Building request with filters:", filters)
+
+  // If on server side, use direct DB call
+  if (typeof window === 'undefined') {
+    console.log("[v0] getOrdenesTrabajo - Using server DB function")
+    try {
+      const result = await getOrdenesDB(filters)
+      console.log("[v0] getOrdenesTrabajo - DB result:", result)
+      return result
+    } catch (error) {
+      console.error("[v0] getOrdenesTrabajo - DB Error:", error)
+      // Return fallback response instead of throwing
+      return {
+        data: [],
+        total: 0,
+        currentPage: filters?.page || 1,
+        lastPage: 1,
+        perPage: filters?.perPage || 10,
+      }
+    }
+  }
+
+  // If on client side, use API client
+  const client = apiClient
 
   const params = new URLSearchParams()
 
@@ -342,7 +368,7 @@ export async function cambiarEstado(
   if (typeof window === 'undefined') {
     console.log("[v0] cambiarEstado - Using server DB function")
     try {
-      const result = await cambiarEstadoDB(ordenId, estadoTransformado)
+      const result = await cambiarEstadoDB(ordenId, estadoTransformado, observaciones)
       console.log("[v0] cambiarEstado - Response:", result)
       return result
     } catch (error) {

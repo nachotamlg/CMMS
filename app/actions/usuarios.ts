@@ -1,6 +1,8 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
+import { createAuditLog } from "./logs"
+import { getSession } from "@/lib/auth"
 import bcrypt from "bcryptjs"
 
 export type Usuario = {
@@ -213,7 +215,7 @@ export async function saveUsuario(usuario: UsuarioWithPassword): Promise<{
     let savedUsuario: any
 
     if (usuario.id) {
-      // Update existing usuario
+      // Update existing usuario - password is OPTIONAL for updates
       const updateData: any = {
         nombre: usuario.nombre,
         email: email,
@@ -222,7 +224,8 @@ export async function saveUsuario(usuario: UsuarioWithPassword): Promise<{
         updated_at: new Date(),
       }
       
-      if (usuario.password) {
+      // Only update password if provided
+      if (usuario.password && usuario.password.trim() !== '') {
         updateData.password = await bcrypt.hash(usuario.password, 10)
       }
       
@@ -260,6 +263,16 @@ export async function saveUsuario(usuario: UsuarioWithPassword): Promise<{
           throw dbError
         }
       }
+      
+      // Log the update
+      const session = await getSession()
+      await createAuditLog({
+        usuario_id: session?.id,
+        accion: 'EDITAR',
+        modulo: 'USUARIOS',
+        descripcion: `Usuario ${usuario.nombre} actualizado`,
+        datos: { usuarioId: usuario.id, nombre: usuario.nombre, rol: usuario.rol }
+      }).catch(err => console.error("[v0] Error logging usuario update:", err))
     } else {
       // Create new usuario
       if (!usuario.password) {
@@ -310,6 +323,16 @@ export async function saveUsuario(usuario: UsuarioWithPassword): Promise<{
         }
         localUsuariosStorage.push(savedUsuario)
       }
+      
+      // Log the creation
+      const session = await getSession()
+      await createAuditLog({
+        usuario_id: session?.id,
+        accion: 'CREAR',
+        modulo: 'USUARIOS',
+        descripcion: `Nuevo usuario ${usuario.nombre} creado`,
+        datos: { usuarioId: savedUsuario.id, nombre: usuario.nombre, rol: usuario.rol }
+      }).catch(err => console.error("[v0] Error logging usuario creation:", err))
     }
 
     console.log("[v0] Usuario saved successfully:", { 
@@ -334,17 +357,45 @@ export async function saveUsuario(usuario: UsuarioWithPassword): Promise<{
   }
 }
 
-export async function removeUsuario(id: number): Promise<{
+export async function removeUsuario(id: number, currentUserId?: number): Promise<{
   success: boolean
   error?: string
 }> {
   try {
+    // Prevent user from deleting themselves
+    if (currentUserId && id === currentUserId) {
+      return {
+        success: false,
+        error: "No puedes eliminar tu propia cuenta",
+      }
+    }
+    
+    const usuario = await prisma.usuario.findUnique({ where: { id } })
+    
+    if (!usuario) {
+      return {
+        success: false,
+        error: "El usuario no existe",
+      }
+    }
+    
     await prisma.usuario.delete({
       where: { id }
     })
+    
+    // Log the deletion
+    const session = await getSession()
+    await createAuditLog({
+      usuario_id: session?.id,
+      accion: 'ELIMINAR',
+      modulo: 'USUARIOS',
+      descripcion: `Usuario ${usuario.nombre} eliminado`,
+      datos: { usuarioId: id, nombre: usuario.nombre }
+    }).catch(err => console.error("[v0] Error logging usuario deletion:", err))
+    
     return { success: true }
   } catch (error: any) {
-    console.error("Error removing usuario:", error)
+    console.error("[v0] Error removing usuario:", error.message)
     return {
       success: false,
       error: error.message || "Error al eliminar el usuario",

@@ -59,12 +59,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 // PUT - Actualizar un mantenimiento
 const updateMantenimientoSchema = z.object({
   equipo_id: z.number().optional(),
+  equipoId: z.number().optional(),
   tipo: z.string().optional(),
   frecuencia: z.string().optional(),
   frecuencia_dias: z.number().optional(),
   proxima_programada: z.string().optional(),
+  proximaFecha: z.string().optional(),
   ultima_realizacion: z.string().optional(),
+  ultimaFecha: z.string().optional(),
   descripcion: z.string().optional(),
+  observaciones: z.string().optional(),
   procedimiento: z.string().optional(),
   tiempo_estimado: z.number().optional(),
   activo: z.boolean().optional(),
@@ -101,13 +105,18 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     
     const updateData: any = {}
     
+    // Mapear campos - soportar tanto camelCase como snake_case
     if (data.equipo_id !== undefined) updateData.equipo_id = data.equipo_id
+    if (data.equipoId !== undefined) updateData.equipo_id = data.equipoId
     if (data.tipo !== undefined) updateData.tipo = data.tipo
     if (data.frecuencia !== undefined) updateData.frecuencia = data.frecuencia
     if (data.frecuencia_dias !== undefined) updateData.frecuencia_dias = data.frecuencia_dias
     if (data.proxima_programada !== undefined) updateData.proxima_programada = new Date(data.proxima_programada)
+    if (data.proximaFecha !== undefined) updateData.proxima_programada = new Date(data.proximaFecha)
     if (data.ultima_realizacion !== undefined) updateData.ultima_realizacion = data.ultima_realizacion ? new Date(data.ultima_realizacion) : null
+    if (data.ultimaFecha !== undefined) updateData.ultima_realizacion = data.ultimaFecha ? new Date(data.ultimaFecha) : null
     if (data.descripcion !== undefined) updateData.descripcion = data.descripcion
+    if (data.observaciones !== undefined) updateData.descripcion = data.observaciones // Mapear observaciones a descripcion
     if (data.procedimiento !== undefined) updateData.procedimiento = data.procedimiento
     if (data.tiempo_estimado !== undefined) updateData.tiempo_estimado = data.tiempo_estimado
     if (data.activo !== undefined) updateData.activo = data.activo
@@ -133,7 +142,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     await prisma.log.create({
       data: {
         usuario_id: session.id,
-        accion: 'Actualizar',
+        accion: 'Editar',
         modulo: 'Mantenimiento',
         descripcion: `Mantenimiento actualizado: ${mantenimiento.tipo} para equipo ${mantenimiento.equipo_id}`,
         datos: { mantenimiento_id: mantenimiento.id },

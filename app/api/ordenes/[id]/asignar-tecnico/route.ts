@@ -73,15 +73,21 @@ export async function POST(
     })
 
     // Crear notificación
-    await prisma.notificacion.create({
-      data: {
-        usuario_id: tecnico_id,
-        tipo: 'orden_asignada',
-        titulo: 'Nueva orden asignada',
-        mensaje: `Se te ha asignado la orden ${orden.numero_orden}`,
-        datos: { orden_id: orden.id },
-      },
-    })
+    try {
+      await prisma.notificacion.create({
+        data: {
+          usuario_id: tecnico_id,
+          tipo: 'orden_asignada',
+          titulo: 'Nueva orden asignada',
+          mensaje: `Se te ha asignado la orden ${orden.numero_orden}`,
+          datos: { orden_id: orden.id },
+        },
+      })
+      console.log('[v0] Notification created for assigned technician:', tecnico_id)
+    } catch (notificationError) {
+      console.error('[v0] Error creating notification for technician assignment:', notificationError)
+      // No throw - we don't want to fail the assignment if notification fails
+    }
 
     // Crear log
     await prisma.log.create({

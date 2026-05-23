@@ -35,7 +35,7 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<RoleType, Record<PermissionKey,
     reportesGenerar: true,
     reportesVer: true,
     logsAcceso: false,
-    configuracionSistema: false,
+    configuracionSistema: true,
   },
   tecnico: {
     gestionEquipos: false,

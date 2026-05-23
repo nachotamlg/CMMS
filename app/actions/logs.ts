@@ -6,14 +6,17 @@ export async function fetchAuditLogs(search?: string, action?: string, perPage =
   try {
     const where: any = {}
     
+    // Apply action filter
     if (action && action !== "all") {
       where.accion = action
     }
     
-    if (search) {
+    // Apply search filter - searches in description, module, and user name
+    if (search && search.trim() !== "") {
       where.OR = [
-        { descripcion: { contains: search, mode: 'insensitive' } },
-        { modulo: { contains: search, mode: 'insensitive' } },
+        { descripcion: { contains: search } },
+        { modulo: { contains: search } },
+        { usuario: { nombre: { contains: search } } }
       ]
     }
 

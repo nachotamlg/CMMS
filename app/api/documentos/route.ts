@@ -137,8 +137,8 @@ export async function POST(request: NextRequest) {
     await prisma.log.create({
       data: {
         usuario_id: session.id,
-        accion: 'Crear',
-        modulo: 'Documentos',
+        accion: 'SUBIR',
+        modulo: 'DOCUMENTOS',
         descripcion: `Documento subido: ${file.name}`,
         datos: { documento_id: documento.id },
       },

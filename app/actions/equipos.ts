@@ -1,6 +1,8 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
+import { createAuditLog } from "./logs"
+import { getSession } from "@/lib/auth"
 
 export type Equipo = {
   id?: number
@@ -118,7 +120,20 @@ export async function fetchEquipoDetails(id: number): Promise<EquipoWithDetails 
         mantenimientos: true,
         ordenesTrabajo: true,
         mantenimientosRealizados: true,
-        documentos: true,
+        documentos: {
+          include: {
+            usuario: {
+              select: {
+                id: true,
+                nombre: true,
+                email: true,
+              }
+            }
+          },
+          orderBy: {
+            created_at: 'desc'
+          }
+        },
       }
     })
     
@@ -129,10 +144,55 @@ export async function fetchEquipoDetails(id: number): Promise<EquipoWithDetails 
   }
 }
 
+// Alias for getEquipo (used in page.tsx)
+export const getEquipo = fetchEquipoDetails
+
 // Guardar equipo (crear o actualizar)
 export async function saveEquipo(data: Equipo, userId?: string): Promise<{ success: boolean; equipo?: Equipo; error?: string }> {
   try {
     console.log(`[v0] Server Action: saveEquipo called with userId ${userId}`, data)
+
+    // Validaciones de backend
+    if (!data.codigo || !/^\d{12}$/.test(data.codigo)) {
+      return { success: false, error: "El código institucional debe tener exactamente 12 dígitos" }
+    }
+
+    if (!data.nombre || data.nombre.trim().length < 3) {
+      return { success: false, error: "El nombre debe tener al menos 3 caracteres" }
+    }
+
+    if (!data.numero_serie || data.numero_serie.trim().length < 3) {
+      return { success: false, error: "El número de serie es obligatorio y debe tener al menos 3 caracteres" }
+    }
+
+    if (!data.estado) {
+      return { success: false, error: "El estado del equipo es obligatorio" }
+    }
+
+    if (!data.criticidad) {
+      return { success: false, error: "El nivel de riesgo es obligatorio" }
+    }
+
+    // Verificar duplicados
+    let equipoExistente = await prisma.equipo.findUnique({
+      where: { codigo: data.codigo },
+    })
+
+    if (equipoExistente && equipoExistente.id !== data.id) {
+      return { success: false, error: "Ya existe un equipo con este código institucional" }
+    }
+
+    // Verificar duplicado de número de serie
+    equipoExistente = await prisma.equipo.findFirst({
+      where: { 
+        numero_serie: data.numero_serie,
+        NOT: { id: data.id || 0 }
+      },
+    })
+
+    if (equipoExistente) {
+      return { success: false, error: "Ya existe un equipo con este número de serie" }
+    }
 
     let equipo: any
     if (data.id && data.id > 0) {
@@ -183,6 +243,18 @@ export async function saveEquipo(data: Equipo, userId?: string): Promise<{ succe
     }
 
     console.log("[v0] Equipment saved successfully:", equipo)
+    
+    // Log the action
+    const isUpdate = data.id && data.id > 0
+    const session = await getSession()
+    await createAuditLog({
+      usuario_id: session?.id,
+      accion: isUpdate ? 'EDITAR' : 'CREAR',
+      modulo: 'EQUIPOS',
+      descripcion: `Equipo ${data.nombre} ${isUpdate ? 'actualizado' : 'creado'}`,
+      datos: { equipoId: equipo.id, nombre: data.nombre, codigo: data.codigo }
+    }).catch(err => console.error("[v0] Error logging equipo operation:", err))
+    
     return { success: true, equipo }
   } catch (error) {
     console.error("[v0] Error saving equipo:", error)
@@ -200,12 +272,58 @@ export async function saveEquipo(data: Equipo, userId?: string): Promise<{ succe
 export async function removeEquipo(id: number, userId?: string): Promise<{ success: boolean; error?: string }> {
   try {
     console.log(`[v0] Server Action: removeEquipo called with ID ${id} and userId ${userId}`)
+    
+    const equipo = await prisma.equipo.findUnique({ where: { id } })
+    
     await prisma.equipo.delete({
       where: { id }
     })
+    
+    // Log the deletion
+    if (equipo) {
+      const session = await getSession()
+      await createAuditLog({
+        usuario_id: session?.id,
+        accion: 'ELIMINAR',
+        modulo: 'EQUIPOS',
+        descripcion: `Equipo ${equipo.nombre} eliminado`,
+        datos: { equipoId: id, nombre: equipo.nombre, codigo: equipo.codigo }
+      }).catch(err => console.error("[v0] Error logging equipo deletion:", err))
+    }
+    
     return { success: true }
   } catch (error) {
     console.error("[v0] Error deleting equipo:", error)
     return { success: false, error: "Error al eliminar el equipo" }
+  }
+}
+
+// Verificar asociaciones del equipo (mantenimientos y ordenes de trabajo)
+export async function checkEquipoAssociations(id: number): Promise<{
+  hasMaintenances: boolean
+  hasWorkOrders: boolean
+  maintenanceCount: number
+  workOrderCount: number
+}> {
+  try {
+    const [maintenanceCount, workOrderCount] = await Promise.all([
+      prisma.mantenimiento.count({ where: { equipo_id: id } }),
+      prisma.ordenTrabajo.count({ where: { equipo_id: id } })
+    ])
+    
+    return {
+      hasMaintenances: maintenanceCount > 0,
+      hasWorkOrders: workOrderCount > 0,
+      maintenanceCount,
+      workOrderCount
+    }
+  } catch (error) {
+    console.error("[v0] Error checking equipment associations:", error)
+    return {
+      hasMaintenances: false,
+      hasWorkOrders: false,
+      maintenanceCount: 0,
+      workOrderCount: 0
+    }
   }
 }
