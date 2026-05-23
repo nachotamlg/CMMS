@@ -1,4 +1,4 @@
-const API_BASE_URL = typeof window !== 'undefined' ? '/api' : 'http://localhost:3000/api'
+const API_BASE_URL = typeof window !== 'undefined' ? '/api/proxy' : 'http://localhost:3000/api/proxy'
 
 class ApiClient {
   private baseUrl: string
@@ -110,7 +110,7 @@ class ApiClient {
       if (error instanceof Error) {
         if (error.name === "AbortError") {
           throw new Error(
-            "Request timeout - El servidor no responde. Verifica la conexión.",
+            "Request timeout - El backend de Laravel no responde. Verifica que esté corriendo en el puerto correcto.",
           )
         }
       }

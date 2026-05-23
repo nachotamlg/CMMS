@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       where,
       orderBy: { created_at: 'desc' },
       include: {
-        subidoPor: {
+        usuario: {
           select: {
             id: true,
             nombre: true,
@@ -84,35 +84,46 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    // Validar tamaño (50MB)
-    const maxSize = 50 * 1024 * 1024
+    // Validar tamaño (10MB)
+    const maxSize = parseInt(process.env.MAX_FILE_SIZE || '10485760')
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: 'Archivo demasiado grande (máximo 50MB)' },
+        { error: 'Archivo demasiado grande (máximo 10MB)' },
         { status: 400 }
       )
     }
     
-    // Leer contenido del archivo
+    // Crear directorio si no existe
+    const uploadDir = process.env.UPLOAD_DIR || './uploads'
+    if (!existsSync(uploadDir)) {
+      await mkdir(uploadDir, { recursive: true })
+    }
+    
+    // Generar nombre único
+    const timestamp = Date.now()
+    const fileName = `${timestamp}-${file.name}`
+    const filePath = join(uploadDir, fileName)
+    
+    // Guardar archivo
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
+    await writeFile(filePath, buffer)
     
-    // Crear registro en BD con contenido del archivo
+    // Crear registro en BD
     const documento = await prisma.documento.create({
       data: {
         tipo,
         nombre: file.name,
         descripcion: descripcion || undefined,
-        contenido_archivo: buffer,
+        ruta_archivo: filePath,
         tipo_archivo: file.type,
-        tamano: Math.ceil(file.size / 1024),
+        tamano: file.size,
         equipo_id: equipo_id ? parseInt(equipo_id) : undefined,
         orden_id: orden_id ? parseInt(orden_id) : undefined,
         subido_por: session.id,
-        almacenado_en_bd: true,
       },
       include: {
-        subidoPor: {
+        usuario: {
           select: {
             id: true,
             nombre: true,
@@ -126,8 +137,8 @@ export async function POST(request: NextRequest) {
     await prisma.log.create({
       data: {
         usuario_id: session.id,
-        accion: 'SUBIR',
-        modulo: 'DOCUMENTOS',
+        accion: 'crear',
+        modulo: 'documentos',
         descripcion: `Documento subido: ${file.name}`,
         datos: { documento_id: documento.id },
       },

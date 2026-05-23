@@ -20,14 +20,8 @@ export async function fetchOrdenesTrabajo(filters?: OrdenesTrabajoFilters): Prom
   try {
     console.log("[v0] fetchOrdenesTrabajo - Calling API with filters:", filters)
     const result = await getOrdenesTrabajo(filters)
-    console.log("[v0] fetchOrdenesTrabajo - API returned:", result?.data?.length ?? 0, "orders")
-    return result || {
-      data: [],
-      total: 0,
-      currentPage: 1,
-      lastPage: 1,
-      perPage: 10,
-    }
+    console.log("[v0] fetchOrdenesTrabajo - API returned:", result.data.length, "orders")
+    return result
   } catch (error) {
     console.error("[v0] fetchOrdenesTrabajo - Error:", error)
     return {
@@ -44,37 +38,36 @@ export async function fetchOrdenTrabajo(id: number): Promise<OrdenTrabajo | null
   try {
     return await getOrdenTrabajo(id)
   } catch (error) {
-    console.error("[v0] fetchOrdenTrabajo - Error:", error)
     return null
   }
 }
 
-export async function saveOrdenTrabajo(orden: Partial<OrdenTrabajo>): Promise<{ success: boolean; data?: OrdenTrabajo; error?: string }> {
+export async function saveOrdenTrabajo(orden: Partial<OrdenTrabajo>): Promise<OrdenTrabajo | null> {
   try {
     console.log("[v0] saveOrdenTrabajo - Input data:", JSON.stringify(orden, null, 2))
 
     if (orden.id) {
       const result = await updateOrdenTrabajo(orden.id, orden)
       console.log("[v0] saveOrdenTrabajo - Update successful:", result)
-      return { success: true, data: result }
+      return result
     } else {
       const result = await createOrdenTrabajo(orden)
       console.log("[v0] saveOrdenTrabajo - Create successful:", result)
-      return { success: true, data: result }
+      return result
     }
   } catch (error) {
     console.error("[v0] saveOrdenTrabajo - Error:", error)
-    let errorMessage = "Error al guardar la orden de trabajo"
     if (error instanceof Error) {
-      errorMessage = error.message
       console.error("[v0] Error message:", error.message)
+      console.error("[v0] Error stack:", error.stack)
     }
-    return { success: false, error: errorMessage }
+    throw error
   }
 }
 
 export async function removeOrdenTrabajo(id: number): Promise<{ success: boolean; error?: string }> {
   console.log("[v0] removeOrdenTrabajo - Starting deletion for id:", id)
+  console.log("[v0] removeOrdenTrabajo - Type of id:", typeof id)
 
   try {
     const result = await deleteOrdenTrabajo(id)
@@ -83,20 +76,24 @@ export async function removeOrdenTrabajo(id: number): Promise<{ success: boolean
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     console.error("[v0] removeOrdenTrabajo - Error caught in action:", error)
+    console.error("[v0] removeOrdenTrabajo - Error details:", {
+      message: errorMessage,
+      type: typeof error,
+      stack: error instanceof Error ? error.stack : undefined,
+    })
     return { success: false, error: errorMessage }
   }
 }
 
-export async function asignarTecnicoAOrden(ordenId: number, tecnicoId: number): Promise<{ success: boolean; data?: OrdenTrabajo; error?: string }> {
+export async function asignarTecnicoAOrden(ordenId: number, tecnicoId: number): Promise<OrdenTrabajo | null> {
   try {
     console.log("[v0] asignarTecnicoAOrden - Action called with ordenId:", ordenId, "tecnicoId:", tecnicoId)
     const result = await asignarTecnico(ordenId, tecnicoId)
     console.log("[v0] asignarTecnicoAOrden - Success:", result)
-    return { success: true, data: result }
+    return result
   } catch (error) {
     console.error("[v0] asignarTecnicoAOrden - Error:", error)
-    const errorMessage = error instanceof Error ? error.message : "Error al asignar técnico"
-    return { success: false, error: errorMessage }
+    return null
   }
 }
 
@@ -104,16 +101,15 @@ export async function cambiarEstadoOrden(
   ordenId: number,
   nuevoEstado: string,
   observaciones?: string,
-): Promise<{ success: boolean; data?: OrdenTrabajo; error?: string }> {
+): Promise<OrdenTrabajo | null> {
   try {
     console.log("[v0] cambiarEstadoOrden - Action called with ordenId:", ordenId, "estado:", nuevoEstado)
     const result = await cambiarEstado(ordenId, nuevoEstado, observaciones)
     console.log("[v0] cambiarEstadoOrden - Success:", result)
-    return { success: true, data: result }
+    return result
   } catch (error) {
     console.error("[v0] cambiarEstadoOrden - Error:", error)
-    const errorMessage = error instanceof Error ? error.message : "Error al cambiar estado"
-    return { success: false, error: errorMessage }
+    return null
   }
 }
 

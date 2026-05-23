@@ -7,15 +7,21 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Mail, Lock } from 'lucide-react'
 import { validateLogin } from "@/app/actions/auth"
-import { getHospitalLogo } from "@/app/actions/configuracion"
 
-
+// Default demo credentials
+const DEMO_USERS = [
+  { correo: "admin@hospital.com", nombre: "Administrador", rol: "admin" },
+  { correo: "supervisor@hospital.com", nombre: "Supervisor", rol: "supervisor" },
+  { correo: "technician@hospital.com", nombre: "Técnico", rol: "tecnico" },
+]
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [rememberMe, setRememberMe] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [hospitalLogo, setHospitalLogo] = useState<string>(
@@ -24,32 +30,12 @@ export default function LoginPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const loadLogo = async () => {
-      // First try to get from localStorage
-      if (typeof window !== 'undefined') {
-        const savedLogo = localStorage.getItem("hospitalLogo")
-        if (savedLogo) {
-          setHospitalLogo(savedLogo)
-          return
-        }
-      }
-      
-      // If not in localStorage, fetch from database
-      try {
-        const dbLogo = await getHospitalLogo()
-        if (dbLogo) {
-          setHospitalLogo(dbLogo)
-          // Cache it in localStorage for future visits
-          if (typeof window !== 'undefined') {
-            localStorage.setItem("hospitalLogo", dbLogo)
-          }
-        }
-      } catch (error) {
-        console.error("[v0] Error loading hospital logo:", error)
+    if (typeof window !== 'undefined') {
+      const savedLogo = localStorage.getItem("hospitalLogo")
+      if (savedLogo) {
+        setHospitalLogo(savedLogo)
       }
     }
-    
-    loadLogo()
   }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -99,15 +85,11 @@ export default function LoginPage() {
 
       if (result.token) {
         localStorage.setItem("authToken", result.token)
-        console.log("[v0] Client: Token saved to localStorage, length:", result.token.length)
-      } else {
-        console.log("[v0] Client: WARNING - No token in result")
       }
 
       console.log("[v0] Client: Verifying localStorage after login:", {
         savedUserId: localStorage.getItem("userId"),
-        isAuthenticated: localStorage.getItem("isAuthenticated"),
-        hasToken: !!localStorage.getItem("authToken")
+        isAuthenticated: localStorage.getItem("isAuthenticated")
       })
 
       console.log("[v0] Client: Login successful, redirecting to dashboard")
@@ -186,7 +168,22 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-
+                {/* Remember Me and Forgot Password */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="remember"
+                      checked={rememberMe}
+                      onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+                    />
+                    <label htmlFor="remember" className="text-sm text-gray-700 cursor-pointer">
+                      Recordarme
+                    </label>
+                  </div>
+                  <a href="#" className="text-sm text-blue-600 hover:text-blue-700 hover:underline">
+                    ¿Olvidaste tu contraseña?
+                  </a>
+                </div>
 
                 {/* Error Message */}
                 {error && <p className="text-sm text-red-500">{error}</p>}
@@ -200,7 +197,22 @@ export default function LoginPage() {
                   {isLoading ? "Iniciando sesión..." : "Iniciar Sesión"}
                 </Button>
 
-
+                {/* Demo Credentials */}
+                <div className="mt-6 rounded-md bg-blue-50 p-4">
+                  <p className="mb-2 text-xs font-semibold text-blue-900">Credenciales de demostración:</p>
+                  <div className="space-y-1 text-xs text-blue-700">
+                    <p>
+                      <span className="font-medium">Administrador:</span> admin@hospital.com
+                    </p>
+                    <p>
+                      <span className="font-medium">Supervisor:</span> supervisor@hospital.com
+                    </p>
+                    <p>
+                      <span className="font-medium">Técnico:</span> technician@hospital.com
+                    </p>
+                    <p className="mt-2 italic">Cualquier contraseña válida para usuarios registrados</p>
+                  </div>
+                </div>
               </div>
             </form>
           </CardContent>

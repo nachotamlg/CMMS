@@ -2,13 +2,11 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "mysql"
-  url      = env("MYSQL_URL")
 }
 
 model Usuario {
@@ -163,20 +161,18 @@ model MantenimientoRealizado {
 }
 
 model Documento {
-  id               Int      @id @default(autoincrement())
-  tipo             String   @db.VarChar(50)
-  nombre           String   @db.VarChar(255)
-  descripcion      String?  @db.Text
-  ruta_archivo     String?  @db.VarChar(500)
-  contenido_archivo Bytes?   @db.LongBlob
-  tipo_archivo     String   @db.VarChar(50)
-  tamano           Int
-  equipo_id        Int?
-  orden_id         Int?
-  subido_por       Int
-  almacenado_en_bd Boolean  @default(true)
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
+  id            Int      @id @default(autoincrement())
+  tipo          String   @db.VarChar(50)
+  nombre        String   @db.VarChar(255)
+  descripcion   String?  @db.Text
+  ruta_archivo  String   @db.VarChar(500)
+  tipo_archivo  String   @db.VarChar(50)
+  tamano        Int
+  equipo_id     Int?
+  orden_id      Int?
+  subido_por    Int
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
 
   // Relaciones
   equipo   Equipo? @relation(fields: [equipo_id], references: [id], onDelete: Cascade)
@@ -229,16 +225,4 @@ model Log {
   @@index([modulo])
   @@index([created_at])
   @@map("logs")
-}
-
-model Configuracion {
-  id              Int      @id @default(autoincrement())
-  clave           String   @unique @db.VarChar(100)
-  valor           String?  @db.Text
-  descripcion     String?  @db.VarChar(255)
-  created_at      DateTime @default(now())
-  updated_at      DateTime @updatedAt
-
-  @@index([clave])
-  @@map("configuracion")
 }

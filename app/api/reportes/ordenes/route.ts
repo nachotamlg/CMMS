@@ -6,7 +6,7 @@ import { startOfMonth, endOfMonth, subMonths } from 'date-fns'
 // GET - Reporte de órdenes de trabajo
 export async function GET(request: NextRequest) {
   try {
-    const session = await requireAuth()
+    await requireAuth()
     
     const { searchParams } = new URL(request.url)
     const meses = parseInt(searchParams.get('meses') || '3')
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const fechaFin = endOfMonth(new Date())
     
     // Órdenes por estado
-    const ordenesPorEstado = await prisma.orden_trabajo.groupBy({
+    const ordenesPorEstado = await prisma.ordenTrabajo.groupBy({
       by: ['estado'],
       _count: true,
       where: {
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     })
     
     // Órdenes por prioridad
-    const ordenesPorPrioridad = await prisma.orden_trabajo.groupBy({
+    const ordenesPorPrioridad = await prisma.ordenTrabajo.groupBy({
       by: ['prioridad'],
       _count: true,
       where: {
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     })
     
     // Órdenes por tipo
-    const ordenesPorTipo = await prisma.orden_trabajo.groupBy({
+    const ordenesPorTipo = await prisma.ordenTrabajo.groupBy({
       by: ['tipo'],
       _count: true,
       where: {
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     })
     
     // Tiempo promedio de resolución
-    const ordenesFinalizadas = await prisma.orden_trabajo.findMany({
+    const ordenesFinalizadas = await prisma.ordenTrabajo.findMany({
       where: {
         estado: 'finalizada',
         fecha_inicio: { not: null },
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
       : 0
     
     // Órdenes pendientes por técnico
-    const ordenesPorTecnico = await prisma.orden_trabajo.groupBy({
+    const ordenesPorTecnico = await prisma.ordenTrabajo.groupBy({
       by: ['asignado_a'],
       _count: true,
       where: {
@@ -119,26 +119,6 @@ export async function GET(request: NextRequest) {
         tiempo_promedio_horas: Math.round(tiempoPromedio * 10) / 10,
       },
       ordenes_pendientes_por_tecnico: ordenesPorTecnicoConNombres,
-    }
-    
-    // Create audit log for report generation
-    try {
-      await prisma.log.create({
-        data: {
-          usuario_id: session.id,
-          accion: 'Exportar',
-          modulo: 'Reportes',
-          descripcion: `Reporte de órdenes de trabajo generado (${meses} meses)`,
-          datos: { 
-            periodo_meses: meses,
-            fecha_inicio: fechaInicio.toISOString(),
-            fecha_fin: fechaFin.toISOString(),
-            total_ordenes: ordenesPorEstado.reduce((sum, item) => sum + item._count, 0)
-          },
-        },
-      })
-    } catch (logError) {
-      console.error("[v0] Error creating audit log:", logError)
     }
     
     return NextResponse.json(reporte)

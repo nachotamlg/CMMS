@@ -21,19 +21,19 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       prisma.equipo.count(),
       
-      prisma.orden_trabajo.count({
+      prisma.ordenTrabajo.count({
         where: {
           created_at: { gte: hace30Dias },
         },
       }),
       
-      prisma.orden_trabajo.count({
+      prisma.ordenTrabajo.count({
         where: {
           estado: { in: ['pendiente', 'en_progreso'] },
         },
       }),
       
-      prisma.orden_trabajo.count({
+      prisma.ordenTrabajo.count({
         where: {
           estado: { in: ['pendiente', 'en_progreso'] },
           fecha_programada: {
@@ -46,7 +46,6 @@ export async function GET(request: NextRequest) {
         where: {
           activo: true,
           proxima_programada: {
-            gte: new Date(),
             lte: subDays(new Date(), -7), // próximos 7 días
           },
         },
@@ -60,24 +59,17 @@ export async function GET(request: NextRequest) {
     ])
     
     // Equipos por estado
-    const equiposPorEstadoRaw = await prisma.equipo.groupBy({
+    const equiposPorEstado = await prisma.equipo.groupBy({
       by: ['estado'],
-      _count: {
-        id: true,
-      },
+      _count: true,
     })
-    
-    const equiposPorEstado = equiposPorEstadoRaw.map(item => ({
-      estado: item.estado,
-      count: item._count.id,
-    }))
     
     // Órdenes por mes (últimos 6 meses)
     const ordenesPorMes = await prisma.$queryRaw`
       SELECT 
         DATE_FORMAT(created_at, '%Y-%m') as mes,
         COUNT(*) as cantidad
-      FROM orden_trabajo
+      FROM ordenes_trabajo
       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
       GROUP BY DATE_FORMAT(created_at, '%Y-%m')
       ORDER BY mes ASC

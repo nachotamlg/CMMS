@@ -9,7 +9,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth(request)
+    await requireAuth()
     const { id } = await params
     
     const equipo = await prisma.equipo.findUnique({
@@ -76,15 +76,14 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireAuth(request)
+    const session = await requireAuth()
     const { id } = await params
     const body = await request.json()
     
     const validation = updateEquipoSchema.safeParse(body)
     if (!validation.success) {
-      const firstError = validation.error.errors?.[0]?.message || 'Validación fallida'
       return NextResponse.json(
-        { error: firstError },
+        { error: validation.error.errors[0].message },
         { status: 400 }
       )
     }
@@ -137,9 +136,9 @@ export async function PUT(
     await prisma.log.create({
       data: {
         usuario_id: session.id,
-        accion: 'Editar',
-        modulo: 'Equipos',
-        descripcion: `Equipo actualizado: ${equipo.nombre} (Código: ${equipo.codigo})`,
+        accion: 'actualizar',
+        modulo: 'equipos',
+        descripcion: `Equipo actualizado: ${equipo.nombre}`,
         datos: { equipo_id: equipo.id },
       },
     })
@@ -160,7 +159,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await requireAuth(request)
+    const session = await requireAuth()
     const { id } = await params
     
     const equipo = await prisma.equipo.findUnique({
@@ -182,9 +181,9 @@ export async function DELETE(
     await prisma.log.create({
       data: {
         usuario_id: session.id,
-        accion: 'Eliminar',
-        modulo: 'Equipos',
-        descripcion: `Equipo eliminado: ${equipo.nombre} (Código: ${equipo.codigo})`,
+        accion: 'eliminar',
+        modulo: 'equipos',
+        descripcion: `Equipo eliminado: ${equipo.nombre}`,
         datos: { equipo_id: equipo.id },
       },
     })

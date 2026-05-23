@@ -1,7 +1,7 @@
 import { apiClient } from "./client"
 import { getUsuarios } from "./usuarios"
 import { getEquipos } from "./equipos"
-import { getMantenimientos } from "./mantenimientos"
+import { getAllMantenimientos } from "./mantenimientos"
 import { getOrdenesTrabajo } from "./ordenes-trabajo"
 
 export interface DashboardStats {
@@ -19,7 +19,7 @@ async function calculateDashboardStats(): Promise<DashboardStats> {
     const [usuarios, equipos, mantenimientos, ordenes] = await Promise.all([
       getUsuarios(),
       getEquipos({}),
-      getMantenimientos(),
+      getAllMantenimientos({}),
       getOrdenesTrabajo({}),
     ])
 
@@ -38,7 +38,7 @@ async function calculateDashboardStats(): Promise<DashboardStats> {
     // Calculate equipment by manufacturer
     const fabricantesMap = new Map<string, number>()
     equipos.data.forEach((equipo) => {
-      const fabricante = equipo.marca || "Desconocido"
+      const fabricante = equipo.fabricante || "Desconocido"
       fabricantesMap.set(fabricante, (fabricantesMap.get(fabricante) || 0) + 1)
     })
     const equiposPorFabricante = Array.from(fabricantesMap.entries())
@@ -59,8 +59,8 @@ async function calculateDashboardStats(): Promise<DashboardStats> {
 
     // Count maintenances by month
     mantenimientos.data.forEach((mant) => {
-      if (mant.proxima_programada) {
-        const fecha = new Date(mant.proxima_programada)
+      if (mant.proximaFecha) {
+        const fecha = new Date(mant.proximaFecha)
         const mesKey = `${fecha.getFullYear()}-${fecha.getMonth()}`
         if (mantenimientosPorMesMap.has(mesKey)) {
           mantenimientosPorMesMap.set(mesKey, (mantenimientosPorMesMap.get(mesKey) || 0) + 1)
