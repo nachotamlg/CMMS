@@ -24,10 +24,22 @@ export async function GET(request: NextRequest) {
     if (tipo) where.tipo = tipo
     if (asignado_a) where.asignado_a = parseInt(asignado_a)
     
+    // Handle search: search by order number OR equipment name
     if (search) {
+      // First, find equipos that match the search
+      const equiposMatching = await prisma.equipo.findMany({
+        where: {
+          nombre: { contains: search }
+        },
+        select: { id: true }
+      })
+      
+      const equipoIds = equiposMatching.map(e => e.id)
+      
+      // Create OR condition: numero_orden matches OR equipo_id in matching equipos
       where.OR = [
-        { numero_orden: { contains: search, mode: 'insensitive' } },
-        { equipo: { nombre: { contains: search, mode: 'insensitive' } } },
+        { numero_orden: { contains: search } },
+        ...(equipoIds.length > 0 ? [{ equipo_id: { in: equipoIds } }] : [])
       ]
     }
     

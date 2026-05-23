@@ -110,10 +110,22 @@ export async function getOrdenesDB(filters?: any): Promise<any> {
       where.equipo_id = filters.equipo_id
     }
 
+    // Handle search: search by order number OR equipment name
     if (filters?.search) {
+      // First, find equipos that match the search
+      const equiposMatching = await prisma.equipo.findMany({
+        where: {
+          nombre: { contains: filters.search }
+        },
+        select: { id: true }
+      })
+      
+      const equipoIds = equiposMatching.map(e => e.id)
+      
+      // Create OR condition: numero_orden matches OR equipo_id in matching equipos
       where.OR = [
-        { numero_orden: { contains: filters.search, mode: 'insensitive' } },
-        { equipo: { nombre: { contains: filters.search, mode: 'insensitive' } } },
+        { numero_orden: { contains: filters.search } },
+        ...(equipoIds.length > 0 ? [{ equipo_id: { in: equipoIds } }] : [])
       ]
     }
 
