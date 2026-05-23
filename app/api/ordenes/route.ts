@@ -16,21 +16,27 @@ export async function GET(request: NextRequest) {
     const asignado_a = searchParams.get('asignado_a')
     const search = searchParams.get('search')
     
-    const where: any = {}
+    // Build AND conditions array for combining multiple filters
+    const andConditions: any = []
     
-    if (equipo_id) where.equipo_id = parseInt(equipo_id)
-    if (estado) where.estado = estado
-    if (prioridad) where.prioridad = prioridad
-    if (tipo) where.tipo = tipo
-    if (asignado_a) where.asignado_a = parseInt(asignado_a)
+    if (equipo_id) andConditions.push({ equipo_id: parseInt(equipo_id) })
+    if (estado) andConditions.push({ estado: estado })
+    if (prioridad) andConditions.push({ prioridad: prioridad })
+    if (tipo) andConditions.push({ tipo: tipo })
+    if (asignado_a) andConditions.push({ asignado_a: parseInt(asignado_a) })
     
     // Add search filter for order number and equipment name
     if (search) {
-      where.OR = [
-        { numero_orden: { contains: search, mode: 'insensitive' } },
-        { equipo: { nombre: { contains: search, mode: 'insensitive' } } },
-      ]
+      andConditions.push({
+        OR: [
+          { numero_orden: { contains: search, mode: 'insensitive' } },
+          { equipo: { nombre: { contains: search, mode: 'insensitive' } } },
+        ]
+      })
     }
+    
+    // Build where clause
+    const where: any = andConditions.length > 0 ? { AND: andConditions } : {}
     
     const ordenes = await prisma.orden_trabajo.findMany({
       where,

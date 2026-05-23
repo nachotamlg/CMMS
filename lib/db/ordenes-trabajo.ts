@@ -96,27 +96,33 @@ export async function getOrdenDB(id: number): Promise<OrdenTrabajo | null> {
 
 export async function getOrdenesDB(filters?: any): Promise<any> {
   try {
-    const where: any = {}
+    // Build AND conditions array for combining multiple filters
+    const andConditions: any = []
 
     if (filters?.estado) {
-      where.estado = filters.estado
+      andConditions.push({ estado: filters.estado })
     }
 
     if (filters?.prioridad) {
-      where.prioridad = filters.prioridad
+      andConditions.push({ prioridad: filters.prioridad })
     }
 
     if (filters?.equipo_id) {
-      where.equipo_id = filters.equipo_id
+      andConditions.push({ equipo_id: filters.equipo_id })
     }
 
     // Add search filter for order number and equipment name
     if (filters?.search) {
-      where.OR = [
-        { numero_orden: { contains: filters.search, mode: 'insensitive' } },
-        { equipo: { nombre: { contains: filters.search, mode: 'insensitive' } } },
-      ]
+      andConditions.push({
+        OR: [
+          { numero_orden: { contains: filters.search, mode: 'insensitive' } },
+          { equipo: { nombre: { contains: filters.search, mode: 'insensitive' } } },
+        ]
+      })
     }
+
+    // Build where clause
+    const where: any = andConditions.length > 0 ? { AND: andConditions } : {}
 
     const perPage = filters?.perPage || 10
     const page = filters?.page || 1
