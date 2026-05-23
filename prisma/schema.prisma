@@ -163,18 +163,20 @@ model MantenimientoRealizado {
 }
 
 model Documento {
-  id            Int      @id @default(autoincrement())
-  tipo          String   @db.VarChar(50)
-  nombre        String   @db.VarChar(255)
-  descripcion   String?  @db.Text
-  ruta_archivo  String   @db.VarChar(500)
-  tipo_archivo  String   @db.VarChar(50)
-  tamano        Int
-  equipo_id     Int?
-  orden_id      Int?
-  subido_por    Int
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  id               Int      @id @default(autoincrement())
+  tipo             String   @db.VarChar(50)
+  nombre           String   @db.VarChar(255)
+  descripcion      String?  @db.Text
+  ruta_archivo     String?  @db.VarChar(500)
+  contenido_archivo Bytes?   @db.LongBlob
+  tipo_archivo     String   @db.VarChar(50)
+  tamano           Int
+  equipo_id        Int?
+  orden_id         Int?
+  subido_por       Int
+  almacenado_en_bd Boolean  @default(true)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
 
   // Relaciones
   equipo   Equipo? @relation(fields: [equipo_id], references: [id], onDelete: Cascade)

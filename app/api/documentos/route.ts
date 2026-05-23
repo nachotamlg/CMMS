@@ -84,46 +84,35 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    // Validar tamaño (10MB)
-    const maxSize = parseInt(process.env.MAX_FILE_SIZE || '10485760')
+    // Validar tamaño (50MB)
+    const maxSize = 50 * 1024 * 1024
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: 'Archivo demasiado grande (máximo 10MB)' },
+        { error: 'Archivo demasiado grande (máximo 50MB)' },
         { status: 400 }
       )
     }
     
-    // Crear directorio si no existe
-    const uploadDir = process.env.UPLOAD_DIR || './uploads'
-    if (!existsSync(uploadDir)) {
-      await mkdir(uploadDir, { recursive: true })
-    }
-    
-    // Generar nombre único
-    const timestamp = Date.now()
-    const fileName = `${timestamp}-${file.name}`
-    const filePath = join(uploadDir, fileName)
-    
-    // Guardar archivo
+    // Leer contenido del archivo
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
-    await writeFile(filePath, buffer)
     
-    // Crear registro en BD
+    // Crear registro en BD con contenido del archivo
     const documento = await prisma.documento.create({
       data: {
         tipo,
         nombre: file.name,
         descripcion: descripcion || undefined,
-        ruta_archivo: filePath,
+        contenido_archivo: buffer,
         tipo_archivo: file.type,
-        tamano: file.size,
+        tamano: Math.ceil(file.size / 1024),
         equipo_id: equipo_id ? parseInt(equipo_id) : undefined,
         orden_id: orden_id ? parseInt(orden_id) : undefined,
         subido_por: session.id,
+        almacenado_en_bd: true,
       },
       include: {
-        usuario: {
+        subidoPor: {
           select: {
             id: true,
             nombre: true,

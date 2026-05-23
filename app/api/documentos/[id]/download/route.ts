@@ -8,13 +8,10 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  console.log('[v0] Download route called')
   try {
     await requireAuth(request)
-    console.log('[v0] Auth passed')
     
     const { id } = await params
-    console.log('[v0] Document ID:', id)
     const documentoId = parseInt(id)
     
     if (isNaN(documentoId)) {
@@ -35,8 +32,21 @@ export async function GET(
       )
     }
     
-    // Check if file exists on disk
-    const filePath = documento.ruta_archivo || documento.url_archivo
+    // Priorizar contenido en BD
+    if (documento.contenido_archivo && documento.almacenado_en_bd) {
+      const headers = new Headers()
+      headers.set('Content-Type', documento.tipo_archivo || 'application/octet-stream')
+      headers.set('Content-Disposition', `attachment; filename="${documento.nombre}"`)
+      headers.set('Content-Length', documento.contenido_archivo.length.toString())
+      
+      return new NextResponse(documento.contenido_archivo, {
+        status: 200,
+        headers,
+      })
+    }
+    
+    // Fallback para archivos antiguos en filesystem
+    const filePath = documento.ruta_archivo
     
     if (!filePath) {
       return NextResponse.json(
@@ -45,20 +55,19 @@ export async function GET(
       )
     }
     
-    // If it's a URL, redirect to it
+    // Si es URL, redirigir
     if (filePath.startsWith('http')) {
       return NextResponse.redirect(filePath)
     }
     
-    // Check if file exists locally
+    // Intenta leer del filesystem
     if (!existsSync(filePath)) {
       return NextResponse.json(
-        { error: 'Archivo no encontrado en el servidor' },
+        { error: 'Archivo no encontrado' },
         { status: 404 }
       )
     }
     
-    // Read and return file
     const fileBuffer = await readFile(filePath)
     
     const headers = new Headers()

@@ -108,17 +108,22 @@ export async function POST(
       )
     }
 
-    // Crear documento en la base de datos
+    // Leer contenido del archivo
+    const bytes = await archivo.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+
+    // Crear documento en la base de datos con contenido
     console.error('[v0] POST /documentos - Creating document in database...')
     const documento = await prisma.documento.create({
       data: {
         nombre: archivo.name,
         tipo: 'archivo',
-        ruta_archivo: `equipos/${equipoId}/${Date.now()}-${archivo.name}`,
+        contenido_archivo: buffer,
         tipo_archivo: archivo.type,
         tamano: Math.ceil(archivo.size / 1024),
         equipo_id: equipoId,
         subido_por: parseInt(subidoPorId),
+        almacenado_en_bd: true,
       },
       include: {
         usuario: {
