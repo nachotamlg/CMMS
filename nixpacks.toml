@@ -12,9 +12,7 @@ cmds = [
 
 [phases.post-build]
 cmds = [
-  "echo '🚀 [RAILWAY] Iniciando migraciones de Prisma...'",
-  "npx prisma migrate deploy --skip-generate",
-  "echo '✅ [RAILWAY] Migraciones completadas exitosamente'"
+  "node scripts/run-migration.js"
 ]
 
 [start]
