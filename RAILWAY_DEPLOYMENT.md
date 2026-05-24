@@ -1,181 +1,270 @@
-# Guía de Despliegue en Railway
+# Despliegue Automático de Base de Datos en Railway
 
-Esta guía te ayudará a desplegar tu aplicación CMMS Biomédico en Railway con una base de datos MySQL.
+## 🎯 Resumen Ejecutivo
 
-## Prerequisitos
+**La base de datos ahora se crea automáticamente sin pasos manuales.**
+
+El flujo de despliegue ejecuta automáticamente:
+1. ✅ Conexión a MySQL
+2. ✅ Creación de todas las tablas (via Prisma migrations)
+3. ✅ Creación de usuarios de ejemplo (seed)
+4. ✅ Inicio de la aplicación
+
+## 📋 Prerequisitos
 
 - Cuenta en [Railway](https://railway.app)
-- Código del proyecto en un repositorio Git (GitHub, GitLab, etc.)
+- Código en GitHub (u otro repositorio Git)
+- MYSQL_URL o DATABASE_URL configurada en Variables de Railway
 
-## Paso 1: Crear un Nuevo Proyecto en Railway
+## 🚀 Pasos de Despliegue
+
+### Paso 1: Crear Proyecto en Railway
 
 1. Ve a [Railway.app](https://railway.app) e inicia sesión
-2. Haz clic en "New Project"
-3. Selecciona "Deploy from GitHub repo"
-4. Autoriza Railway para acceder a tu repositorio
-5. Selecciona el repositorio de tu proyecto
+2. Haz clic en **"New Project"**
+3. Selecciona **"Deploy from GitHub repo"**
+4. Autoriza y selecciona tu repositorio
 
-## Paso 2: Agregar Base de Datos MySQL
+### Paso 2: Agregar Base de Datos MySQL
 
-1. En tu proyecto de Railway, haz clic en "+ New"
-2. Selecciona "Database" → "Add MySQL"
-3. Railway creará automáticamente una base de datos MySQL
-4. Espera a que la base de datos esté lista (verás un ícono verde)
+1. En tu proyecto, haz clic en **"+ New"**
+2. Selecciona **"Database" → "Add MySQL"**
+3. Espera a que esté lista (ícono verde ✅)
 
-## Paso 3: Conectar la Base de Datos a tu Aplicación
+### Paso 3: Configurar Variables de Entorno
 
-Railway genera automáticamente variables de entorno para la conexión. Necesitas configurar:
+Railway crea automáticamente variables de MySQL. Necesitas:
 
-1. Haz clic en tu servicio Next.js
-2. Ve a la pestaña "Variables"
-3. Agrega las siguientes variables de entorno:
-
-### Variables Requeridas:
+1. Haz clic en tu servicio **Next.js**
+2. Ve a pestaña **"Variables"**
+3. Agrega:
 
 ```bash
-# Railway proporciona automáticamente MYSQL_URL
-# Cópiala y úsala como DATABASE_URL
+# La variable DATABASE_URL se referencia automáticamente desde MySQL
 DATABASE_URL=${{MySQL.DATABASE_URL}}
 
 # JWT Secret (genera una clave segura)
-JWT_SECRET=tu-secreto-super-seguro-de-al-menos-32-caracteres
+JWT_SECRET=tu-clave-segura-de-32-caracteres-minimo
 
-# Opcional: Forzar seed incluso si ya hay datos (déjalo en false normalmente)
-# El seed se ejecuta automáticamente si la base de datos está vacía
+# Opcional: Ejecutar seed automáticamente en primer despliegue
 RUN_SEED=false
 ```
 
-### Generar JWT_SECRET
-
-Puedes generar un JWT_SECRET seguro con:
-
+**Generar JWT_SECRET seguro:**
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-O usa un generador online como [RandomKeygen](https://randomkeygen.com/)
+### Paso 4: Realizar el Despliegue
 
-## Paso 4: Configurar el Dominio (Opcional)
+1. Haz **push a GitHub** desde tu rama principal
+2. Railway detecta automáticamente el cambio y comienza el build
+3. Ve a pestaña **"Deployments"** para ver logs en tiempo real
 
-1. En tu servicio Next.js, ve a "Settings" → "Networking"
-2. Railway generará automáticamente un dominio público
-3. También puedes agregar tu dominio personalizado aquí
+## ⚙️ Flujo Automático de Despliegue
 
-## Paso 5: Desplegar
-
-1. Railway detectará automáticamente el `railway.json` y `nixpacks.toml`
-2. El primer despliegue se iniciará automáticamente
-3. Puedes ver los logs en tiempo real en la pestaña "Deployments"
-
-### El proceso de despliegue hará automáticamente:
-
-- Instalar dependencias (`npm ci`)
-- Generar cliente Prisma (`npx prisma generate`)
-- Compilar Next.js (`npm run build`)
-- **Crear TODAS las tablas automáticamente** en MySQL (`npx prisma db push`)
-- Poblar la base de datos con usuarios de prueba (si está vacía o `RUN_SEED=true`)
-- Iniciar la aplicación
-
-**No necesitas ejecutar scripts SQL manualmente**, Railway creará todas las tablas al desplegar.
-
-## Paso 6: Verificar el Despliegue
-
-1. Una vez completado, accede a tu URL de Railway
-2. Ve a `/api/health` para verificar que la API y la base de datos funcionen
-3. Deberías ver: `{"status":"healthy","timestamp":"...","database":"connected"}`
-
-## Paso 7: Primer Login
-
-La primera vez que se despliega, el sistema detecta automáticamente que la base de datos está vacía y crea usuarios de prueba:
-
-**Admin:**
-- Email: `admin@hospital.com`
-- Password: `admin123`
-
-**Técnico:**
-- Email: `tecnico@hospital.com`
-- Password: `tecnico123`
-
-**IMPORTANTE:** Cambia estas contraseñas inmediatamente después del primer login en producción.
-
-## Comandos Útiles
-
-### Ver Logs en Tiempo Real
-```bash
-# Desde tu proyecto en Railway, ve a Deployments → View Logs
+```
+┌─────────────────────────────────────────────────────────┐
+│ 1. GitHub Push                                          │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│ 2. Railway Build                                        │
+│    └─ npm ci                                            │
+│    └─ npm run build:railway                            │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│ 3. docker-entrypoint.sh (NUEVO)                         │
+│    ├─ Verifica conexión a MySQL (retry automático) ✓   │
+│    ├─ Ejecuta: npx prisma migrate deploy ✓             │
+│    ├─ Ejecuta: npm run db:seed (si está vacía) ✓       │
+│    └─ Inicia: npm run start ✓                          │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│ 4. Aplicación en Línea                                  │
+│    ├─ Accesible en: https://tu-app.railway.app         │
+│    ├─ Health check: /api/health                        │
+│    └─ Base de datos: LISTA PARA USAR ✓                │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### Acceder a la Base de Datos
+## 📊 Tablas Creadas Automáticamente
+
+**Tablas principales:**
+- `usuarios` - Usuarios del sistema (admin + técnico de ejemplo)
+- `equipos` - Equipos biomédicos
+- `ordenes_trabajo` - Órdenes de mantenimiento
+- `documentos` - Documentos/archivos adjuntos (NUEVO)
+- `auditoria_documentos` - Auditoría de documentos (NUEVO)
+
+**Tablas de soporte:**
+- `mantenimientos` - Registros de mantenimiento
+- `logs` - Logs de actividad
+- `notificaciones` - Notificaciones del sistema
+
+Todas con índices optimizados y relaciones configuradas automáticamente.
+
+## 👥 Usuarios de Ejemplo Creados Automáticamente
+
+Si el seed se ejecuta (base de datos vacía o `RUN_SEED=true`):
+
+| Rol | Email | Contraseña | Permisos |
+|-----|-------|-----------|----------|
+| Admin | admin@cmms.com | admin123 | Acceso total |
+| Técnico | tecnico@cmms.com | tecnico123 | Gestion de equipos, órdenes |
+
+⚠️ **IMPORTANTE:** Cambia estas contraseñas en producción.
+
+## 📝 Archivos Modificados
+
+### 1. **docker-entrypoint.sh** ← Principal
 ```bash
-# En la pestaña de MySQL, haz clic en "Connect" para obtener credenciales
-# Puedes conectarte con cualquier cliente MySQL como MySQL Workbench o DBeaver
+#!/bin/sh
+# Verifica conexión a MySQL con retry automático
+# Ejecuta migraciones de Prisma
+# Ejecuta seed (opcional)
+# Inicia Next.js
 ```
 
-### Ejecutar Migraciones Manualmente
+### 2. **scripts/railway-start.sh** ← Delegador
 ```bash
-# Si necesitas ejecutar migraciones después del despliegue:
-# 1. Conéctate a Railway CLI: railway login
-# 2. Vincula tu proyecto: railway link
-# 3. Ejecuta: railway run npx prisma db push
+#!/bin/sh
+# Configura variables de entorno
+# Llama a docker-entrypoint.sh
 ```
 
-## Estructura de Variables de Entorno en Railway
+### 3. **lib/db/db-init.ts** ← Verificación
+```ts
+// Verifica que la conexión funciona
+// Valida que tablas existen
+// Proporciona diagnóstico en caso de error
+```
 
-Railway proporciona estas variables automáticamente desde MySQL:
+## 🔍 Monitorear el Despliegue
 
-- `MYSQL_URL`: URL de conexión completa
-- `MYSQLHOST`: Host de la base de datos
-- `MYSQLPORT`: Puerto (generalmente 3306)
-- `MYSQLDATABASE`: Nombre de la base de datos
-- `MYSQLUSER`: Usuario
-- `MYSQLPASSWORD`: Contraseña
+### Ver logs en tiempo real:
+1. Railway Dashboard → Tu proyecto
+2. Pestaña **"Deployments"**
+3. Haz clic en el despliegue actual → **"View Logs"**
 
-Usa `DATABASE_URL=${{MySQL.DATABASE_URL}}` para referenciar la URL de MySQL.
+### Logs esperados (éxito):
+```
+===================================
+🚀 CMMS - Railway Deployment
+===================================
+✅ [RAILWAY] Usando MYSQL_URL como DATABASE_URL
+✅ [RAILWAY] MySQL está disponible
+📦 [PRISMA] Ejecutando migraciones...
+✅ [PRISMA] Migraciones completadas
+🌱 [SEED] Ejecutando seed de base de datos...
+✅ [SEED] Seed completado exitosamente
+📡 Iniciando servidor Next.js en puerto 3000...
+===================================
+```
 
-## Solución de Problemas
+## ✅ Verificar que Funciona
 
-### Error: "Cannot connect to database"
-- Verifica que `DATABASE_URL` esté configurada correctamente
-- Asegúrate de que el servicio MySQL esté funcionando (ícono verde)
-- Revisa los logs en Railway para más detalles
+1. Una vez completado el despliegue, accede a tu URL
+2. Ve a `/api/health`
+3. Deberías ver:
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "timestamp": "2024-12-20T..."
+}
+```
 
-### Error: "Prisma Client not found"
-- El build debería ejecutar `npx prisma generate` automáticamente
-- Si persiste, verifica que `nixpacks.toml` esté en la raíz del proyecto
+## 🔧 Troubleshooting
 
-### Error: "JWT_SECRET is not defined"
-- Asegúrate de haber agregado `JWT_SECRET` en las variables de entorno
-- El valor debe tener al menos 32 caracteres
+### Error: "DATABASE_URL is not set"
+**Solución:**
+- Railway → Variables → Verifica que `MYSQL_URL` está visible
+- Si no aparece, re-agrega la relación entre Next.js y MySQL
 
-### Tabla no existe
-- Asegúrate de que `prisma db push` se ejecute en el script de inicio
-- Revisa los logs de despliegue para ver si hubo errores en la migración
+### Las tablas no se crean
+**Causa:** `docker-entrypoint.sh` no tiene permisos de ejecución
 
-## Actualizaciones Automáticas
+**Solución:**
+```bash
+chmod +x docker-entrypoint.sh
+git add docker-entrypoint.sh
+git commit -m "Fix: executable permissions"
+git push
+```
 
-Railway está configurado para redesplegar automáticamente cuando:
-- Haces push a la rama principal de tu repositorio
+### Base de datos vacía (sin usuarios)
+**Causa:** Seed no se ejecutó (es opcional por defecto)
+
+**Solución:**
+```bash
+# Opción 1: Ejecutar seed manualmente
+railway run npm run db:seed
+
+# Opción 2: Forzar seed en siguiente despliegue
+# Railway → Variables → RUN_SEED = true → Nuevo despliegue
+```
+
+### Error: "Could not connect to MySQL"
+**Causas posibles:**
+- MySQL aún está iniciándose
+- Variables de entorno incorrectas
+- Railway MySQL no está en estado "Up"
+
+**Solución:**
+- Espera 1-2 minutos y realiza otro despliegue
+- Verifica que Railway MySQL tiene ícono verde ✅
+- Copia `MYSQL_URL` desde Railway UI directamente
+
+## 🔄 Flujo de Actualizaciones
+
+Railway redespliega automáticamente cuando:
+- Haces push a la rama conectada
 - Cambias variables de entorno
 - Actualizas la configuración del servicio
 
-## Monitoreo
+Las nuevas migraciones se ejecutan automáticamente (Prisma es inteligente).
 
-Railway proporciona métricas básicas:
-- CPU y Memoria en la pestaña "Metrics"
-- Logs en tiempo real en "Deployments"
-- Health checks automáticos en `/api/health`
+## 📚 Comandos Útiles
 
-## Costos
+### Acceder a la base de datos manualmente:
+```bash
+# 1. Login a Railway CLI
+railway login
 
-Railway ofrece:
-- $5 USD de crédito gratis mensual
-- Plan Hobby: $5/mes por servicio después del crédito gratuito
-- Plan Pro: Desde $20/mes con más recursos
+# 2. Vincula tu proyecto
+railway link
 
-Verifica los precios actuales en [railway.app/pricing](https://railway.app/pricing)
+# 3. Conecta a MySQL
+railway run mysql -h $MYSQL_HOSTNAME -u $MYSQL_USER -p$MYSQL_PASSWORD
 
-## Soporte
+# 4. Ver datos
+SELECT * FROM usuarios;
+```
 
-- Documentación de Railway: [docs.railway.app](https://docs.railway.app)
-- Discord de Railway: [discord.gg/railway](https://discord.gg/railway)
-- Guía de Prisma 7: [prisma.io/docs](https://prisma.io/docs)
+### Ejecutar seed manualmente:
+```bash
+railway run npm run db:seed
+```
+
+### Resetear base de datos:
+```bash
+railway run mysql -h $MYSQL_HOSTNAME -u $MYSQL_USER -p$MYSQL_PASSWORD
+# DROP DATABASE railway;
+# CREATE DATABASE railway;
+```
+
+## 💰 Costos
+
+- Railway: $5 USD crédito gratis/mes
+- Después: $5/mes por servicio (hobby plan)
+- Ver precios: [railway.app/pricing](https://railway.app/pricing)
+
+## 📖 Referencias Útiles
+
+- [Railway Docs](https://docs.railway.app)
+- [Prisma Migrations](https://www.prisma.io/docs/concepts/components/prisma-migrate)
+- [Railway MySQL](https://docs.railway.app/databases/mysql)
+- [Docker Entrypoint Best Practices](https://docs.docker.com/engine/reference/builder/#entrypoint)
