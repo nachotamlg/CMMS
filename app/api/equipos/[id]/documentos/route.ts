@@ -112,18 +112,32 @@ export async function POST(
     const bytes = await archivo.arrayBuffer()
     const buffer = Buffer.from(bytes)
 
+    // Determinar tipo de documento basado en extensión
+    const obtenerTipoDocumento = (nombreArchivo: string): string => {
+      const ext = nombreArchivo.split('.').pop()?.toLowerCase() || '';
+      if (ext === 'pdf') return 'manual';
+      if (['xls', 'xlsx', 'csv'].includes(ext)) return 'especificaciones';
+      if (['doc', 'docx', 'txt'].includes(ext)) return 'certificado';
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'garantia';
+      return 'otro';
+    };
+
+    const tipoDocumento = obtenerTipoDocumento(archivo.name);
+
     // Crear documento en la base de datos con contenido
     console.error('[v0] POST /documentos - Creating document in database...')
     const documento = await prisma.documento.create({
       data: {
         nombre: archivo.name,
-        tipo: 'archivo',
+        tipo: tipoDocumento,
+        descripcion: formData.get('descripcion') as string || undefined,
         contenido_archivo: buffer,
         tipo_archivo: archivo.type,
-        tamano: Math.ceil(archivo.size / 1024),
+        tamano: archivo.size,
         equipo_id: equipoId,
         subido_por: parseInt(subidoPorId),
         almacenado_en_bd: true,
+        estado: 'activo',
       },
       include: {
         usuario: {
@@ -138,6 +152,18 @@ export async function POST(
 
     console.error('[v0] POST /documentos - Document created successfully:', documento.id, documento.nombre)
 
+    // Registrar auditoría de documento
+    await prisma.auditoriaDocumento.create({
+      data: {
+        documento_id: documento.id,
+        usuario_id: session.id,
+        accion: 'subida',
+        descripcion: `Documento "${archivo.name}" subido para equipo ${equipo.nombre}`,
+        ip_address: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+        user_agent: request.headers.get('user-agent') || undefined,
+      },
+    })
+
     // Crear log
     await prisma.log.create({
       data: {
@@ -145,7 +171,7 @@ export async function POST(
         accion: 'Subir',
         modulo: 'Documentos',
         descripcion: `Documento subido: ${archivo.name} para equipo ${equipo.nombre} (Código: ${equipo.codigo})`,
-        datos: { documento_id: documento.id, equipo_id: equipoId },
+        datos: { documento_id: documento.id, equipo_id: equipoId, tipo: tipoDocumento },
       },
     })
 

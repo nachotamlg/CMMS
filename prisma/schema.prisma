@@ -32,6 +32,7 @@ model Usuario {
   notificaciones       Notificacion[]
   logs                 Log[]
   documentosCreados    Documento[]
+  auditoriaDocumentos  AuditoriaDocumento[] @relation("AuditoriaDocumento")
 
   @@index([email])
   @@index([rol])
@@ -163,30 +164,55 @@ model MantenimientoRealizado {
 }
 
 model Documento {
-  id               Int      @id @default(autoincrement())
-  tipo             String   @db.VarChar(50)
-  nombre           String   @db.VarChar(255)
-  descripcion      String?  @db.Text
-  ruta_archivo     String?  @db.VarChar(500)
+  id                Int      @id @default(autoincrement())
+  tipo              String   @db.VarChar(50)
+  nombre            String   @db.VarChar(255)
+  descripcion       String?  @db.Text
+  ruta_archivo      String?  @db.VarChar(500)
   contenido_archivo Bytes?   @db.LongBlob
-  tipo_archivo     String   @db.VarChar(50)
-  tamano           Int
-  equipo_id        Int?
-  orden_id         Int?
-  subido_por       Int
-  almacenado_en_bd Boolean  @default(true)
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
+  tipo_archivo      String   @db.VarChar(50)
+  tamano            Int
+  equipo_id         Int?
+  orden_id          Int?
+  subido_por        Int
+  almacenado_en_bd  Boolean  @default(false)
+  estado            String   @default("activo") @db.VarChar(50)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
 
   // Relaciones
-  equipo   Equipo? @relation(fields: [equipo_id], references: [id], onDelete: Cascade)
-  orden    OrdenTrabajo? @relation(fields: [orden_id], references: [id], onDelete: Cascade)
-  usuario  Usuario @relation(fields: [subido_por], references: [id])
+  equipo            Equipo? @relation(fields: [equipo_id], references: [id], onDelete: Cascade)
+  orden             OrdenTrabajo? @relation(fields: [orden_id], references: [id], onDelete: Cascade)
+  usuario           Usuario @relation(fields: [subido_por], references: [id])
+  auditoria         AuditoriaDocumento[]
 
   @@index([equipo_id])
   @@index([orden_id])
   @@index([tipo])
+  @@index([subido_por])
+  @@index([estado])
   @@map("documentos")
+}
+
+model AuditoriaDocumento {
+  id           Int      @id @default(autoincrement())
+  documento_id Int
+  usuario_id   Int
+  accion       String   @db.VarChar(100)
+  descripcion  String?  @db.Text
+  ip_address   String?  @db.VarChar(45)
+  user_agent   String?  @db.Text
+  created_at   DateTime @default(now())
+
+  // Relaciones
+  documento Documento @relation(fields: [documento_id], references: [id], onDelete: Cascade)
+  usuario   Usuario @relation("AuditoriaDocumento", fields: [usuario_id], references: [id])
+
+  @@index([documento_id])
+  @@index([usuario_id])
+  @@index([accion])
+  @@index([created_at])
+  @@map("auditoria_documentos")
 }
 
 model Notificacion {

@@ -129,24 +129,53 @@ CREATE TABLE IF NOT EXISTS ordenes_trabajo (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- TABLA: Documentos
+-- TABLA: Documentos (Mejorada para soporte de archivos)
 -- ============================================
 CREATE TABLE IF NOT EXISTS documentos (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  id_equipo INT NOT NULL,
-  nombre VARCHAR(255) NOT NULL,
-  tipo ENUM('manual', 'especificaciones', 'garantia', 'certificado', 'otro') DEFAULT 'otro',
-  url VARCHAR(500) NOT NULL,
-  ruta_almacenamiento VARCHAR(500),
-  tamaño_bytes INT,
-  fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  subido_por INT,
+  tipo VARCHAR(50) NOT NULL COMMENT 'manual, especificaciones, garantia, certificado, otro',
+  nombre VARCHAR(255) NOT NULL COMMENT 'Nombre del archivo',
+  descripcion TEXT COMMENT 'Descripción del documento',
+  ruta_archivo VARCHAR(500) COMMENT 'Ruta en almacenamiento externo (Vercel Blob, etc)',
+  contenido_archivo LONGBLOB COMMENT 'Contenido del archivo almacenado en BD (para archivos pequeños)',
+  tipo_archivo VARCHAR(50) NOT NULL COMMENT 'image/png, application/pdf, application/vnd.ms-excel, etc',
+  tamano INT NOT NULL COMMENT 'Tamaño en bytes',
+  id_equipo INT COMMENT 'Referencia al equipo',
+  id_orden INT COMMENT 'Referencia a orden de trabajo (si aplica)',
+  subido_por INT NOT NULL COMMENT 'Usuario que subió el archivo',
+  almacenado_en_bd BOOLEAN DEFAULT FALSE COMMENT 'Si el contenido está almacenado en la BD',
+  estado VARCHAR(50) DEFAULT 'activo' COMMENT 'activo, archivado, eliminado',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (id_equipo) REFERENCES equipos(id) ON DELETE CASCADE,
-  FOREIGN KEY (subido_por) REFERENCES usuarios(id) ON DELETE SET NULL,
+  FOREIGN KEY (id_orden) REFERENCES ordenes_trabajo(id) ON DELETE CASCADE,
+  FOREIGN KEY (subido_por) REFERENCES usuarios(id) ON DELETE RESTRICT,
   INDEX idx_id_equipo (id_equipo),
+  INDEX idx_id_orden (id_orden),
   INDEX idx_tipo (tipo),
-  INDEX idx_fecha_subida (fecha_subida)
+  INDEX idx_subido_por (subido_por),
+  INDEX idx_estado (estado),
+  INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================
+-- TABLA: Auditoría de Documentos
+-- ============================================
+CREATE TABLE IF NOT EXISTS auditoria_documentos (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  documento_id INT NOT NULL,
+  usuario_id INT NOT NULL,
+  accion VARCHAR(100) NOT NULL COMMENT 'subida, descarga, visualizacion, eliminacion, restauracion',
+  descripcion TEXT,
+  ip_address VARCHAR(45),
+  user_agent TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (documento_id) REFERENCES documentos(id) ON DELETE CASCADE,
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE RESTRICT,
+  INDEX idx_documento_id (documento_id),
+  INDEX idx_usuario_id (usuario_id),
+  INDEX idx_accion (accion),
+  INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================

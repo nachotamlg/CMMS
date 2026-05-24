@@ -59,7 +59,7 @@ export async function GET(
   }
 }
 
-// DELETE - Eliminar documento
+// DELETE - Eliminar (soft delete) documento
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -88,21 +88,26 @@ export async function DELETE(
       )
     }
     
-    // Try to delete file from disk
-    const filePath = documento.ruta_archivo || documento.url_archivo
-    if (filePath && !filePath.startsWith('http') && existsSync(filePath)) {
-      try {
-        await unlink(filePath)
-      } catch (fileError) {
-        console.error('[v0] Error deleting file from disk:', fileError)
-        // Continue with database deletion even if file deletion fails
-      }
-    }
-    
-    // Delete from database
-    await prisma.documento.delete({
+    // Soft delete: marcar como eliminado en lugar de borrar completamente
+    const documentoActualizado = await prisma.documento.update({
       where: { id: documentoId },
+      data: {
+        estado: 'eliminado',
+        updated_at: new Date(),
+      },
     })
+    
+    // Registrar auditoría
+    await prisma.auditoriaDocumento.create({
+      data: {
+        documento_id: documentoId,
+        usuario_id: session.id,
+        accion: 'eliminacion',
+        descripcion: `Documento "${documento.nombre}" marcado como eliminado`,
+        ip_address: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
+        user_agent: request.headers.get('user-agent') || undefined,
+      },
+    }).catch(err => console.error('[v0] Error registering audit:', err))
     
     // Create audit log
     await prisma.log.create({
@@ -115,7 +120,13 @@ export async function DELETE(
       },
     }).catch(err => console.error('[v0] Error creating audit log:', err))
     
-    return NextResponse.json({ success: true, message: 'Documento eliminado correctamente' })
+    console.log('[v0] DELETE /documentos/[id] - Document soft deleted successfully:', documentoId)
+    
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Documento eliminado correctamente',
+      documento: documentoActualizado 
+    })
   } catch (error: any) {
     console.error('[v0] Error deleting documento:', error)
     return NextResponse.json(
