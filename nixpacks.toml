@@ -5,7 +5,17 @@ nixPkgs = ["nodejs_20", "openssl"]
 cmds = ["npm ci"]
 
 [phases.build]
-cmds = ["npx prisma generate", "npm run build"]
+cmds = [
+  "npx prisma generate",
+  "npm run build"
+]
+
+[phases.post-build]
+cmds = [
+  "echo '[RAILWAY] Running Prisma migrations...'",
+  "npx prisma migrate deploy --skip-generate || npx prisma db push --skip-generate --accept-data-loss || true",
+  "echo '[RAILWAY] Migrations completed'"
+]
 
 [start]
 cmd = "npm run start:railway"
