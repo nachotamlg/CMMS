@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
-import { getNotifications, type Notification } from "@/app/actions/notificaciones"
+import { getNotifications, type Notification } from "@/lib/api/notifications"
 
 function getNotificationIcon(tipo?: string) {
   const iconClass = "h-4 w-4 flex-shrink-0"
@@ -102,65 +102,81 @@ export function NotificationsDropdown() {
           <span className="sr-only">Notificaciones ({unreadCount} sin leer)</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-96 p-0 shadow-lg">
+      <DropdownMenuContent align="end" className="w-96 p-0 shadow-xl border border-border/50 bg-background/95 backdrop-blur-sm">
         {/* Header */}
-        <div className="px-4 py-3 border-b bg-gradient-to-r from-primary/5 to-transparent">
+        <div className="px-5 py-4 border-b bg-gradient-to-r from-primary/8 via-primary/5 to-transparent">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="font-semibold text-sm text-foreground">Notificaciones</p>
-              <p className="text-xs text-muted-foreground">
-                {unreadCount > 0 ? `${unreadCount} sin leer` : "Todas vistas"}
+              <div className="flex items-center gap-2 mb-1">
+                <Bell className="h-4 w-4 text-primary" />
+                <p className="font-semibold text-sm text-foreground">Notificaciones</p>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                {unreadCount > 0 ? (
+                  <span className="text-primary font-medium">{unreadCount} sin leer</span>
+                ) : (
+                  "Todas vistas"
+                )}
               </p>
             </div>
           </div>
         </div>
 
         {/* Content */}
-        <div className="max-h-96 overflow-y-auto">
+        <div className="max-h-[420px] overflow-y-auto">
           {loading ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              <div className="animate-pulse inline-block">
-                <Bell className="h-6 w-6 opacity-40" />
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              <div className="flex justify-center mb-3">
+                <div className="animate-spin">
+                  <Bell className="h-6 w-6 opacity-50" />
+                </div>
               </div>
-              <p className="mt-2">Cargando...</p>
+              <p>Cargando notificaciones...</p>
             </div>
           ) : notifications.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              <Bell className="h-8 w-8 opacity-30 mx-auto mb-2" />
-              <p>No hay notificaciones</p>
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              <div className="flex justify-center mb-3">
+                <div className="p-3 rounded-full bg-muted/50">
+                  <Bell className="h-6 w-6 opacity-50" />
+                </div>
+              </div>
+              <p className="font-medium">No hay notificaciones</p>
+              <p className="text-xs mt-1">Aquí aparecerán tus notificaciones</p>
             </div>
           ) : (
-            <div className="divide-y">
+            <div className="divide-y divide-border/50">
               {recentNotifications.map((notification) => (
                 <div
                   key={notification.id}
-                  className={`px-4 py-3 transition-all ${getNotificationBgClass(notification.tipo)} ${
-                    !notification.leida ? "border-l-2 border-l-primary bg-primary/5" : ""
+                  className={`px-5 py-3.5 transition-all hover:bg-muted/40 cursor-default ${
+                    !notification.leida ? "bg-primary/5 border-l-2 border-l-primary" : ""
                   }`}
                 >
-                  <div className="flex gap-3 items-start">
-                    <div className={`p-2 rounded-lg flex-shrink-0 ${
-                      notification.tipo === "error" ? "bg-red-200/50" :
-                      notification.tipo === "warning" ? "bg-amber-200/50" :
-                      notification.tipo === "success" ? "bg-emerald-200/50" :
-                      "bg-blue-200/50"
+                  <div className="flex gap-3.5 items-start">
+                    <div className={`p-2.5 rounded-lg flex-shrink-0 ${
+                      notification.tipo === "error" ? "bg-red-100 dark:bg-red-900/30" :
+                      notification.tipo === "warning" ? "bg-amber-100 dark:bg-amber-900/30" :
+                      notification.tipo === "success" ? "bg-emerald-100 dark:bg-emerald-900/30" :
+                      "bg-blue-100 dark:bg-blue-900/30"
                     }`}>
                       {getNotificationIcon(notification.tipo)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start justify-between gap-2 mb-0.5">
                         <p className="text-sm font-semibold text-foreground leading-tight">
                           {notification.titulo}
                         </p>
                         {!notification.leida && (
-                          <div className="h-2 w-2 rounded-full bg-primary flex-shrink-0 mt-1" />
+                          <span className="flex-shrink-0 inline-block">
+                            <span className="h-2.5 w-2.5 rounded-full bg-primary inline-block" />
+                          </span>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed line-clamp-2">
+                      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2 mb-1.5">
                         {notification.mensaje}
                       </p>
-                      <p className="text-xs text-muted-foreground mt-1.5">
-                        {formatTime(notification.fecha)}
+                      <p className="text-xs text-muted-foreground/80 font-medium">
+                        {formatTime(notification.created_at)}
                       </p>
                     </div>
                   </div>
@@ -173,16 +189,15 @@ export function NotificationsDropdown() {
         {/* Footer */}
         {notifications.length > 0 && (
           <>
-            <DropdownMenuSeparator className="m-0" />
-            <div className="p-3 bg-muted/30 text-center">
-              <Link href="/notificaciones">
+            <div className="border-t bg-gradient-to-b from-background to-muted/20">
+              <Link href="/notificaciones" className="block">
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  className="w-full justify-center text-primary hover:text-primary hover:bg-primary/10"
+                  className="w-full justify-between rounded-none py-3 px-5 text-primary hover:text-primary hover:bg-primary/8 transition-all"
                 >
-                  Ver todas las notificaciones
-                  <ArrowRight className="h-4 w-4 ml-2" />
+                  <span className="text-sm font-medium">Ver todas las notificaciones</span>
+                  <ArrowRight className="h-4 w-4 opacity-60" />
                 </Button>
               </Link>
             </div>

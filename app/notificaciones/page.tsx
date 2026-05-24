@@ -99,31 +99,33 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-b from-background via-background to-muted/20">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <div className="p-2 bg-primary/10 rounded-lg">
+        {/* Header Section */}
+        <div className="mb-10">
+          <div className="flex items-start justify-between gap-6 flex-wrap">
+            <div className="flex-1">
+              <div className="flex items-center gap-4 mb-3">
+                <div className="p-3 bg-gradient-to-br from-primary/20 to-primary/10 rounded-xl ring-1 ring-primary/20">
                   <Bell className="h-6 w-6 text-primary" />
                 </div>
-                <h1 className="text-3xl font-bold text-foreground">Notificaciones</h1>
+                <div>
+                  <h1 className="text-4xl font-bold text-foreground">Notificaciones</h1>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {notifications.length === 0 
+                      ? "Sin notificaciones por el momento" 
+                      : `${unreadCount} sin leer de ${notifications.length} total`}
+                  </p>
+                </div>
               </div>
-              <p className="text-sm text-muted-foreground ml-11">
-                {notifications.length === 0 
-                  ? "No tienes notificaciones" 
-                  : `${unreadCount} sin leer de ${notifications.length} total`}
-              </p>
             </div>
             {unreadCount > 0 && (
               <Button
                 onClick={handleMarkAllAsRead}
                 size="sm"
-                className="mt-2"
+                className="gap-2 whitespace-nowrap"
               >
-                <Check className="h-4 w-4 mr-2" />
+                <Check className="h-4 w-4" />
                 Marcar todas como leídas
               </Button>
             )}
@@ -131,25 +133,25 @@ export default function NotificationsPage() {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="all" onValueChange={(value) => setFilter(value as typeof filter)} className="mb-6">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="all">
+        <Tabs defaultValue="all" onValueChange={(value) => setFilter(value as typeof filter)} className="mb-8">
+          <TabsList className="grid w-full grid-cols-3 bg-muted/50 rounded-lg">
+            <TabsTrigger value="all" className="gap-2 data-[state=active]:bg-background">
               Todas
-              <Badge variant="secondary" className="ml-2">
+              <Badge variant="secondary" className="rounded-full">
                 {notifications.length}
               </Badge>
             </TabsTrigger>
-            <TabsTrigger value="unread">
+            <TabsTrigger value="unread" className="gap-2 data-[state=active]:bg-background">
               Sin leer
               {unreadCount > 0 && (
-                <Badge variant="destructive" className="ml-2">
+                <Badge variant="destructive" className="rounded-full">
                   {unreadCount}
                 </Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="read">
+            <TabsTrigger value="read" className="gap-2 data-[state=active]:bg-background">
               Leídas
-              <Badge variant="secondary" className="ml-2">
+              <Badge variant="secondary" className="rounded-full">
                 {notifications.filter((n) => n.leida).length}
               </Badge>
             </TabsTrigger>
@@ -159,17 +161,21 @@ export default function NotificationsPage() {
         {/* Notifications List */}
         <div className="space-y-3">
           {loading ? (
-            <Card className="p-12 text-center">
+            <Card className="p-16 text-center border-dashed">
               <div className="flex justify-center mb-4">
-                <div className="animate-pulse">
+                <div className="animate-spin">
                   <Bell className="h-8 w-8 text-muted-foreground opacity-50" />
                 </div>
               </div>
-              <p className="text-muted-foreground">Cargando notificaciones...</p>
+              <p className="text-muted-foreground font-medium">Cargando notificaciones...</p>
             </Card>
           ) : filteredNotifications.length === 0 ? (
-            <Card className="p-12 text-center border-dashed">
-              <Info className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-40" />
+            <Card className="p-16 text-center border-dashed bg-muted/30">
+              <div className="flex justify-center mb-4">
+                <div className="p-4 bg-muted/50 rounded-full">
+                  <Info className="h-8 w-8 text-muted-foreground opacity-60" />
+                </div>
+              </div>
               <p className="text-muted-foreground font-medium">
                 {filter === "unread" 
                   ? "No tienes notificaciones sin leer" 
@@ -177,21 +183,24 @@ export default function NotificationsPage() {
                   ? "No tienes notificaciones leídas" 
                   : "No tienes notificaciones"}
               </p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Aquí aparecerán tus notificaciones cuando las recibas
+              </p>
             </Card>
           ) : (
             filteredNotifications.map((notification) => (
               <Card
                 key={notification.id}
-                className={`border p-4 transition-all duration-200 hover:shadow-md cursor-default ${getNotificationStyles(notification.tipo, !notification.leida)}`}
+                className={`border p-5 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 cursor-default ${getNotificationStyles(notification.tipo, !notification.leida)}`}
               >
                 <div className="flex gap-4">
                   {/* Icon */}
-                  <div className="flex-shrink-0 flex items-center pt-1">
-                    <div className={`p-2 rounded-lg ${
-                      notification.tipo === "error" ? "bg-red-100" :
-                      notification.tipo === "warning" ? "bg-amber-100" :
-                      notification.tipo === "success" ? "bg-emerald-100" :
-                      "bg-blue-100"
+                  <div className="flex-shrink-0 flex items-center pt-0.5">
+                    <div className={`p-2.5 rounded-lg ${
+                      notification.tipo === "error" ? "bg-red-100 dark:bg-red-900/30" :
+                      notification.tipo === "warning" ? "bg-amber-100 dark:bg-amber-900/30" :
+                      notification.tipo === "success" ? "bg-emerald-100 dark:bg-emerald-900/30" :
+                      "bg-blue-100 dark:bg-blue-900/30"
                     }`}>
                       {getNotificationIcon(notification.tipo)}
                     </div>
@@ -201,18 +210,18 @@ export default function NotificationsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-4 mb-1">
                       <div className="flex-1">
-                        <h3 className="font-semibold text-foreground text-base">
+                        <h3 className="font-semibold text-foreground text-base leading-tight">
                           {notification.titulo}
                         </h3>
                       </div>
                       {!notification.leida && (
-                        <div className="flex-shrink-0">
-                          <div className="h-2 w-2 rounded-full bg-primary mt-2"></div>
+                        <div className="flex-shrink-0 mt-1">
+                          <span className="h-2.5 w-2.5 rounded-full bg-primary inline-block" />
                         </div>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground mb-2">
-                      {new Date(notification.fecha).toLocaleDateString("es-ES", {
+                    <p className="text-xs text-muted-foreground/80 mb-2 font-medium">
+                      {new Date(notification.created_at).toLocaleDateString("es-ES", {
                         year: "numeric",
                         month: "short",
                         day: "numeric",
@@ -233,7 +242,7 @@ export default function NotificationsPage() {
                         size="sm"
                         onClick={() => handleMarkAsRead(notification.id)}
                         title="Marcar como leída"
-                        className="h-8 w-8 p-0"
+                        className="h-8 w-8 p-0 hover:bg-primary/10 hover:text-primary"
                       >
                         <Check className="h-4 w-4" />
                       </Button>
@@ -243,7 +252,7 @@ export default function NotificationsPage() {
                       size="sm"
                       onClick={() => handleDelete(notification.id)}
                       title="Eliminar"
-                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                      className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
