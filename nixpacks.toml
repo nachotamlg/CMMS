@@ -12,9 +12,9 @@ cmds = [
 
 [phases.post-build]
 cmds = [
-  "echo '[RAILWAY] Running Prisma migrations...'",
-  "npx prisma migrate deploy --skip-generate || npx prisma db push --skip-generate --accept-data-loss || true",
-  "echo '[RAILWAY] Migrations completed'"
+  "echo '🚀 [RAILWAY] Iniciando migraciones de Prisma...'",
+  "npx prisma migrate deploy --skip-generate",
+  "echo '✅ [RAILWAY] Migraciones completadas exitosamente'"
 ]
 
 [start]
