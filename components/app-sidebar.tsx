@@ -35,6 +35,8 @@ const menuItemsByRole = {
     { title: "Configuración", icon: Cog, id: "configuracion" },
   ],
   tecnico: [
+    { title: "Dashboard", icon: BarChart3, id: "dashboard" },
+    { title: "Gestión de equipos", icon: Wrench, id: "equipos" },
     { title: "Órdenes de trabajo", icon: FileText, id: "ordenes" },
     { title: "Programar mantenimiento", icon: Settings, id: "mantenimiento" },
     { title: "Reportes", icon: BarChart3, id: "reportes" },
@@ -62,7 +64,7 @@ export function AppSidebar({ activeSection, onSectionChange, userRole, hospitalL
   // Ensure the normalized role is one of the valid roles
   const validRoles: ("administrador" | "supervisor" | "tecnico")[] = ["administrador", "supervisor", "tecnico"]
   const isValidRole = validRoles.includes(normalizedRole)
-  const finalRole = isValidRole ? normalizedRole : "tecnico"
+  const finalRole = isValidRole ? normalizedRole : "administrador"
   
   const menuItems = menuItemsByRole[finalRole]
   const { toggleSidebar, state } = useSidebar()
