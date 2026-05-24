@@ -62,7 +62,7 @@ export function AppSidebar({ activeSection, onSectionChange, userRole, hospitalL
   // Ensure the normalized role is one of the valid roles
   const validRoles: ("administrador" | "supervisor" | "tecnico")[] = ["administrador", "supervisor", "tecnico"]
   const isValidRole = validRoles.includes(normalizedRole)
-  const finalRole = isValidRole ? normalizedRole : "administrador"
+  const finalRole = isValidRole ? normalizedRole : "tecnico"
   
   const menuItems = menuItemsByRole[finalRole]
   const { toggleSidebar, state } = useSidebar()
