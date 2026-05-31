@@ -1,5 +1,22 @@
 # Configuración de Base de Datos MySQL - CMMS Biomédico
 
+## ⚠️ IMPORTANTE - LEE ESTO PRIMERO
+
+**USA ESTOS ARCHIVOS:**
+- ✓ `setup-cmms-database-valid.sql` - Script SQL con contraseñas válidas
+- ✓ `setup-database-valid.js` - Script Node.js con contraseñas válidas
+
+**NO USES ESTOS (hashes inválidos):**
+- ✗ `setup-cmms-database.sql` - Script antiguo
+- ✗ `setup-database.js` - Script antiguo
+
+Las credenciales que funcionan son:
+- **admin@cmms.local** / **admin123**
+- **supervisor@cmms.local** / **supervisor123**
+- **tecnico123** para todos los técnicos
+
+---
+
 ## Descripción General
 
 Este conjunto de scripts automatiza la creación y configuración completa de la base de datos MySQL para el sistema CMMS Biomédico, incluyendo:
@@ -138,19 +155,19 @@ Configuraciones del sistema
 Ejemplo: APP_NAME, APP_VERSION, TIMEZONE, MAX_FILE_SIZE, etc.
 ```
 
-## Usuarios de Prueba
+## Usuarios de Prueba - CREDENCIALES VÁLIDAS
 
-Se crean automáticamente 5 usuarios:
+Se crean automáticamente 5 usuarios con contraseñas válidas:
 
 | Email | Rol | Contraseña | Permisos |
 |-------|-----|-----------|----------|
-| admin@cmms.local | Administrador | admin123 | Todos |
-| supervisor@cmms.local | Supervisor | supervisor123 | Gestión general |
-| juan@cmms.local | Técnico | tecnico123 | Ejecución de órdenes |
-| maria@cmms.local | Técnico | tecnico123 | Ejecución de órdenes |
-| carlos@cmms.local | Técnico | tecnico123 | Ejecución de órdenes |
+| admin@cmms.local | Administrador | **admin123** | Todos |
+| supervisor@cmms.local | Supervisor | **supervisor123** | Gestión general |
+| juan@cmms.local | Técnico | **tecnico123** | Ejecución de órdenes |
+| maria@cmms.local | Técnico | **tecnico123** | Ejecución de órdenes |
+| carlos@cmms.local | Técnico | **tecnico123** | Ejecución de órdenes |
 
-**Nota:** Las contraseñas en producción deben ser hasheadas con bcrypt.
+**Nota:** Las contraseñas están hasheadas con bcrypt en la base de datos y son funcionales para login inmediatamente.
 
 ## Usuario de Base de Datos
 
